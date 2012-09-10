@@ -1,0 +1,9 @@
+*.pyc
+*.swp
+*.swo
+*.a
+*.o
+*.out
+*.out.*
+__pycache__
+
