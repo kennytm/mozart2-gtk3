@@ -50,17 +50,17 @@ def is_primitive_type(typ):
     kind = typ.kind
     return kind == TypeKind.BOOL or kind in INTEGER_KINDS or kind in FLOAT_KINDS
 
-def create_encode_statement(typ, source_name, target_name):
-    "Create a statement encoding a C value into an Oz UnstableNode."
+def create_encode_statements(typ, source_name, target_name):
+    "Create the statements encoding a C value into an Oz UnstableNode."
 
     if is_primitive_type(typ):
-        return "auto %s = ::mozart::build(vm, %s);" % (target_name, source_name)
+        return ["auto %s = build(vm, %s);" % (target_name, source_name)]
 
     elif is_c_string(typ):
-        return """
-            auto %(s)s = ::mozart::toUTF<nchar>(::mozart::makeLString(%(i)s));
-            auto %(t)s = ::mozart::String::build(vm, ::mozart::newLString(vm, %(s)s));
-        """ % {'s': unique_str(), 'i': source_name, 't': target_name}
+        return ["""
+            auto %(s)s = toUTF<nchar>(makeLString(%(i)s));
+            auto %(t)s = String::build(vm, newLString(vm, %(s)s));
+        """ % {'s': unique_str(), 'i': source_name, 't': target_name}]
 
     elif typ.kind == TypeKind.RECORD:
         statements = []
@@ -76,8 +76,8 @@ def create_encode_statement(typ, source_name, target_name):
             statements.append(create_encode_statement(subtype, source_name + "." + name, target))
 
         statements.append("""
-            auto %s = ::mozart::buildRecord(vm,
-                ::mozart::buildArity(vm, MOZART_STR("%s"), MOZART_STR("%s")),
+            auto %s = buildRecord(vm,
+                buildArity(vm, MOZART_STR("%s"), MOZART_STR("%s")),
                 std::move(%s)
             );
         """ % (
@@ -87,20 +87,20 @@ def create_encode_statement(typ, source_name, target_name):
             '), std::move('.join(targets)
         ))
 
-        return '\n'.join(statements)
+        return statements
 
     else:
         raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
                                   (source_name, target_name, typ.kind.spelling.decode('utf-8')))
 
-def create_decode_statement(typ, source_name, target_name):
-    "Create a statement decoding an Oz RichNode into a pre-declared C value."
+def create_decode_statements(typ, source_name, target_name):
+    "Create the statements decoding an Oz RichNode into a pre-declared C value."
 
     if is_c_string(typ):
-        return """
-            auto %(uniq)s = ::mozart::vsToString<char>(vm, %(src)s);
+        return ["""
+            auto %(uniq)s = vsToString<char>(vm, %(src)s);
             %(tgt)s = %(uniq)s.c_str();
-        """ % {'tgt': target_name, 'src': source_name, 'uniq': unique_str()}
+        """ % {'tgt': target_name, 'src': source_name, 'uniq': unique_str()}]
 
     elif is_primitive_type(typ):
         kind = typ.kind
@@ -114,32 +114,64 @@ def create_decode_statement(typ, source_name, target_name):
             interface = "FloatValue"
             method = "floatValue"
 
-        return "%s = %s(%s).%s(vm);" % (target_name, interface, source_name, method)
+        return ["%s = %s(%s).%s(vm);" % (target_name, interface, source_name, method)]
 
     elif typ.kind == TypeKind.RECORD:
         temp_interface_name = unique_str()
-        statements = ["::mozart::Dottable " + temp_interface_name + "(" + source_name + ");"]
+        statements = ["Dottable " + temp_interface_name + "(" + source_name + ");"]
         struct_decl = typ.get_declaration()
         for decl in struct_decl.get_children():
             subtype = decl.type
             name = decl.spelling.decode('utf-8')
             src = unique_str()
             statements.append("""
-                auto %s = %s.dot(vm, ::mozart::build(vm, MOZART_STR("%s")));
+                auto %s = %s.dot(vm, build(vm, MOZART_STR("%s")));
             """ % (src, temp_interface_name, name))
             statements.append(create_decode_statement(subtype, src, target_name + '.' + name))
 
-        return '\n'.join(statements)
+        return statements
 
     else:
         raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
                                   (source_name, target_name, typ.kind.spelling.decode('utf-8')))
+
+def get_arg_spec(function, func_name):
+    cc_statements = []
+    arg_names = []
+    arg_inouts = []
+    res_names = []
+
+    func_type = function.type
+    for arg_type in func_type.argument_types():
+        arg_name = unique_str()
+        res_name = unique_str()
+        cc_statements.extend(create_decode_statements(arg_type.get_canonical(), arg_name, res_name))
+        arg_names.append(arg_name)
+        arg_inouts.append('In')
+        res_names.append(res_name)
+
+    ret_type = function.result_type.get_canonical()
+    cc_statements.append("%s(%s);" % (func_name, ', '.join(res_names)))
+    if ret_type.kind != TypeKind.VOID:
+        res_name = unique_str()
+        return_name = unique_str()
+        cc_statements[-1] = "auto %s = %s" % (res_name, cc_statements[-1]);
+        cc_statements.extend(create_encode_statements(ret_type, res_name, return_name))
+        arg_names.append(return_name)
+        arg_inouts.append('Out')
+
+    arg_proto = ''.join(', ' + p + ' ' + q for p, q in zip(arg_inouts, arg_names))
+
+    return (arg_proto, cc_statements)
+
+
 
 class Translator:
     def __init__(self, module):
         self._module = module
         self._cc_file = open(join(SRC, module + CC_EXT), 'w')
         self._hh_file = open(join(SRC, module + HH_EXT), 'w')
+        self._incomplete_structs = set()
 
     def __enter__(self):
         self._cc_file.__enter__()
@@ -154,7 +186,7 @@ class Translator:
     def _print_header(self):
         format_params = {
             'guard': 'M2G3_MODULE_' + self._module.upper() + "_" + unique_str(),
-            'mod': capitalize(self._module),
+            'mod': self._module,
             'hh-file': self._module,
             'hh-ext': HH_EXT
         }
@@ -167,9 +199,12 @@ class Translator:
 
             namespace m2g3 {
 
-            struct Mod%(mod)s : Module
+            using namespace mozart;
+            using namespace mozart::builtins;
+
+            struct M_%(mod)s : Module
             {
-                Mod%(mod)s() : Module("%(mod)s") {}
+                M_%(mod)s() : Module("%(mod)s") {}
         """ % format_params)
 
         self._cc_file.write("""
@@ -191,12 +226,41 @@ class Translator:
             }
         """)
 
+    def _print_function(self, function):
+        source_func_name = function.spelling.decode('utf-8')
+        (arg_proto, cc_statements) = get_arg_spec(function, source_func_name)
+
+        params = {
+            'target': strip_prefix_and_camelize(source_func_name),
+            'args': arg_proto,
+            'mod': self._module,
+        }
+
+        self._hh_file.write("""
+                struct P_%(target)s : Builtin<P_%(target)s>
+                {
+                    P_%(target)s() : Builtin("%(target)s") {}
+                    void operator()(VM vm%(args)s) const;
+                };
+        """ % params)
+
+        self._cc_file.write("""
+            void M_%(mod)s::P_%(target)s::operator()(VM vm%(args)s) const
+            {
+        """ % params)
+        for statement in cc_statements:
+            self._cc_file.write('\n')
+            self._cc_file.write(statement)
+        self._cc_file.write("}\n")
+
     def print(self):
         self._print_header()
 
         tu = TranslationUnit.from_source(join(C_FILES, self._module + C_EXT))
         for node in tu.cursor.get_children():
             kind = node.kind
+            if kind == CursorKind.FUNCTION_DECL:
+                self._print_function(node)
 
         self._print_footer()
 
