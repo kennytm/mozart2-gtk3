@@ -5,12 +5,15 @@ import sys
 import re
 from os.path import join
 from clang.cindex import TranslationUnit, Config, CursorKind, TypeKind
+from constants import *
 
 C_FILES = 'c-files'
 C_EXT = '.c'
 SRC = 'src'
 CC_EXT = '.cc'
 HH_EXT = '.hh'
+TYPES_HH_EXT = '-types.hh'
+TYPES_DECL_HH_EXT = '-types-decl.hh'
 
 Config.set_compatibility_check(False)
 
@@ -90,6 +93,7 @@ def create_encode_statements(typ, source_name, target_name):
         return statements
 
     else:
+        return [';']
         raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
                                   (source_name, target_name, typ.kind.spelling.decode('utf-8')))
 
@@ -132,6 +136,7 @@ def create_decode_statements(typ, source_name, target_name):
         return statements
 
     else:
+        return [';']
         raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
                                   (source_name, target_name, typ.kind.spelling.decode('utf-8')))
 
@@ -164,6 +169,59 @@ def get_arg_spec(function, func_name):
 
     return (arg_proto, cc_statements)
 
+def create_datatype(struct_name, is_pointer):
+    params = {'s': struct_name}
+
+    statements = ["""
+        class D_%(s)s;
+
+        #ifndef MOZART_GENERATOR
+        #include "D_%(s)s-implem-decl.hh"
+        #endif
+    """ % params, None, """
+        #ifndef MOZART_GENERATOR
+        #include "%(s)s-implem-decl-after.hh"
+        #endif
+    """ % params]
+
+    if is_pointer:
+        statements[1] = """
+            class D_%(s)s : public DataType<D_%(s)s>, StoredAs<%(s)s*>
+            {
+            public:
+                typedef SelfType<D_%(s)s>::Self Self;
+
+                D_%(s)s(%(s)s* value) : _value(value) {}
+
+                static void create(%(s)s*& self, VM vm, %(s)s* value) { self = value; }
+                static void create(%(s)s*& self, VM vm, GR gr, Self from) { self = from->_value; }
+
+                %(s)s* value() const { return _value; }
+
+            private:
+                %(s)s* _value;
+            };
+        """ % params
+
+    else:
+        statements[1] = """
+            class D_%(s)s : public DataType<D_%(s)s>
+            {
+            public:
+                typedef SelfType<D_%(s)s>::Self Self;
+
+                D_%(s)s(VM vm, const %(s)s& value) : _value(value) {}
+                D_%(s)s(VM vm, GR gr, Self from) : _value(from->_value) {}
+
+                %(s)s* value() { return &_value; }
+
+            private:
+                %(s)s _value;
+            };
+        """ % params
+
+    return statements
+
 
 
 class Translator:
@@ -171,36 +229,48 @@ class Translator:
         self._module = module
         self._cc_file = open(join(SRC, module + CC_EXT), 'w')
         self._hh_file = open(join(SRC, module + HH_EXT), 'w')
-        self._incomplete_structs = set()
+        self._types_hh_file = open(join(SRC, module + TYPES_HH_EXT), 'w')
+        self._types_decl_hh_file = open(join(SRC, module + TYPES_DECL_HH_EXT), 'w')
+        self._structs = {}
+
+    def _all_files(self):
+        return [self._cc_file, self._hh_file,
+                self._types_decl_hh_file, self._types_hh_file]
 
     def __enter__(self):
-        self._cc_file.__enter__()
-        self._hh_file.__enter__()
+        for f in self._all_files():
+            f.__enter__()
         return self
 
     def __exit__(self, p, q, r):
-        if self._hh_file.__exit__(p, q, r):
-            p = q = r = None
-        return self._cc_file.__exit__(p, q, r)
+        handled = False
+        for f in reversed(self._all_files()):
+            handled = f.__exit__(p, q, r)
+            if handled:
+                p = q = r = None
+        return handled
 
     def _print_header(self):
         format_params = {
             'guard': 'M2G3_MODULE_' + self._module.upper() + "_" + unique_str(),
             'mod': self._module,
             'hh-file': self._module,
-            'hh-ext': HH_EXT
+            'hh-ext': HH_EXT,
+            'common-header': """
+                #include <mozart.hh>
+
+                namespace m2g3 {
+
+                using namespace mozart;
+                using namespace mozart::builtins;
+            """
         }
 
         self._hh_file.write("""
             #ifndef %(guard)s
             #define %(guard)s
 
-            #include <mozart.hh>
-
-            namespace m2g3 {
-
-            using namespace mozart;
-            using namespace mozart::builtins;
+            %(common-header)s
 
             struct M_%(mod)s : Module
             {
@@ -213,6 +283,21 @@ class Translator:
             namespace m2g3 {
         """ % format_params)
 
+        self._types_decl_hh_file.write("""
+            #ifndef %(guard)s_DATATYPES_DECL
+            #define %(guard)s_DATATYPES_DECL
+
+            %(common-header)s
+        """ % format_params)
+
+        self._types_hh_file.write("""
+            #ifndef %(guard)s_DATATYPES
+            #define %(guard)s_DATATYPES
+
+            %(common-header)s
+        """ % format_params)
+
+
     def _print_footer(self):
         self._hh_file.write("""
             };
@@ -224,6 +309,18 @@ class Translator:
 
         self._cc_file.write("""
             }
+        """)
+
+        self._types_decl_hh_file.write("""
+            }
+
+            #endif
+        """)
+
+        self._types_hh_file.write("""
+            }
+
+            #endif
         """)
 
     def _print_function(self, function):
@@ -253,6 +350,25 @@ class Translator:
             self._cc_file.write(statement)
         self._cc_file.write("}\n")
 
+    def _collect_structure(self, typedef):
+        type_name = typedef.spelling.decode('utf-8')
+        underlying_type = typedef.underlying_typedef_type
+        if underlying_type.kind != TypeKind.UNEXPOSED:
+            return
+        if underlying_type.get_canonical().kind != TypeKind.RECORD:
+            return
+        if type_name in BLACKLISTED_TYPEDEFS:
+            return
+        is_complete = underlying_type.get_declaration().is_definition()
+        if is_complete or type_name not in self._structs:
+            self._structs[type_name] = is_complete
+
+    def _print_structures(self):
+        for struct_name, is_complete in self._structs.items():
+            data_type = create_datatype(struct_name, not is_complete)
+            self._types_decl_hh_file.writelines(data_type)
+            self._types_hh_file.write('#include "D_%s-implem.hh"\n' % struct_name)
+
     def print(self):
         self._print_header()
 
@@ -261,7 +377,10 @@ class Translator:
             kind = node.kind
             if kind == CursorKind.FUNCTION_DECL:
                 self._print_function(node)
+            elif kind == CursorKind.TYPEDEF_DECL:
+                self._collect_structure(node)
 
+        self._print_structures()
         self._print_footer()
 
 def main(module):
