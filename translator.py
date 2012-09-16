@@ -165,7 +165,11 @@ class Translator:
         Print a single function.
         """
         source_func_name = function.spelling.decode('utf-8')
-        (arg_proto, cc_statements) = get_cc_function_definition(function, source_func_name)
+        try:
+            (arg_proto, cc_statements) = get_cc_function_definition(function, source_func_name)
+        except NotImplementedError as e:
+            print('Note: Current function = ' + source_func_name, file=sys.stderr)
+            raise
 
         params = {
             'target': strip_prefix_and_camelize(source_func_name),
