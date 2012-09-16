@@ -111,7 +111,7 @@ def create_in_statements_pre(typ, oz_name, cc_name, with_declaration):
 
 STATEMENTS_CREATORS = {
     'in': (create_in_statements_pre, create_no_statements, 'In'),
-    'out': (create_no_statements, create_out_statements_post, 'Out'),
+    'out-return': (create_no_statements, create_out_statements_post, 'Out'),
 }
 
 def get_arg_spec(func_cursor, c_func_name):
@@ -127,7 +127,7 @@ def get_arg_spec(func_cursor, c_func_name):
 
     return_type = func_cursor.result_type.get_canonical()
     if return_type.kind != TypeKind.VOID:
-        (stc_pre, stc_post, oz_inout) = STATEMENTS_CREATORS['out']
+        (stc_pre, stc_post, oz_inout) = STATEMENTS_CREATORS['out-return']
         yield (return_type, '_x_oz_return', stc_pre, stc_post, oz_inout)
 
 
