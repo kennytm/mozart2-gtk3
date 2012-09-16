@@ -6,4 +6,5 @@
 *.out
 *.out.*
 __pycache__
-
+.coverage
+htmlcov
