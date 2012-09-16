@@ -1,5 +1,6 @@
 from constants import *
 from common import *
+from to_cc import to_cc
 
 def create_no_statements(typ, name_1, name_2, with_declaration):
     return []
@@ -49,10 +50,12 @@ def create_out_statements_post(typ, cc_name, oz_name, with_declaration):
 
         return cc_statements
 
-    else:
-        return [';']
-        raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
-                                  (cc_name, oz_name, typ.kind.spelling.decode('utf-8')))
+    elif typ.kind == TypeKind.POINTER:
+        cc_real_name = '(*(' + cc_name + '))'
+        return create_out_statements_post(typ.get_pointee(), cc_real_name, oz_name, with_declaration)
+
+    raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
+                              (cc_name, oz_name, typ.kind.spelling.decode('utf-8')))
 
 def create_in_statements_pre(typ, oz_name, cc_name, with_declaration):
     """
@@ -101,17 +104,40 @@ def create_in_statements_pre(typ, oz_name, cc_name, with_declaration):
                                                           temp_oz_field_name,
                                                           cc_name + '.' + field_name,
                                                           with_declaration=False))
-
         return cc_statements
 
-    else:
-        return [';']
-        raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
-                                  (source_name, target_name, typ.kind.spelling.decode('utf-8')))
+    elif typ.kind == TypeKind.POINTER:
+        pointee = typ.get_pointee().get_canonical()
+        if pointee.kind == TypeKind.RECORD:
+            struct = pointee.get_declaration()
+            if not struct.is_definition():
+                struct_name = struct.spelling.decode('utf-8')
+                return ['%s = %s.as<D_%s>().value()' % (prefix, oz_name, struct_name)]
+
+        cc_complete_name = unique_str()
+        cc_statements = create_in_statements_pre(pointee, oz_name, cc_complete_name, with_declaration=True)
+        cc_statements.append('%s = &%s;' % (prefix, cc_complete_name))
+        return cc_statements
+
+
+    raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
+                              (oz_name, cc_name, typ.kind.spelling.decode('utf-8')))
+
+def create_deref_declarations_pre(typ, oz_name, cc_name, with_declaration):
+    """
+    Create a declaration for arguments accepting a C++ pointer as an output
+    argument.
+    """
+    prefix = 'auto ' + cc_name if with_declaration else cc_name
+    cc_complete_name = unique_str()
+    cc_decl = to_cc(typ.get_pointee(), cc_complete_name)
+    return ["%s; %s = &%s;" % (cc_decl, prefix, cc_complete_name)]
+
 
 STATEMENTS_CREATORS = {
     'in': (create_in_statements_pre, create_no_statements, 'In'),
     'out-return': (create_no_statements, create_out_statements_post, 'Out'),
+    'out': (create_deref_declarations_pre, create_out_statements_post, 'Out'),
 }
 
 def get_arg_spec(func_cursor, c_func_name):
