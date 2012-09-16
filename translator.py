@@ -158,15 +158,16 @@ def create_in_statements_pre(typ, oz_name, cc_name, with_declaration):
             interface = "FloatValue"
             method = "floatValue"
 
-        return ['%s = %s(%s).%s(vm)' % (prefix, interface, oz_name, method)]
+        return ['%s = %s(%s).%s(vm);' % (prefix, interface, oz_name, method)]
 
     elif typ.kind == TypeKind.RECORD:
         temp_interface_name = unique_str()
         struct_decl = typ.get_declaration()
+        struct_name = struct_decl.spelling.decode('utf-8')
 
         cc_statements = ["Dottable %s(%s);" % (temp_interface_name, oz_name)]
         if with_declaration:
-            cc_statements.append(struct_decl.spelling.decode('utf-8') + ' ' + cc_name + ';')
+            cc_statements.append(struct_name + ' ' + cc_name + ';')
 
         for decl in struct_decl.get_children():
             subtype = decl.type
@@ -179,6 +180,8 @@ def create_in_statements_pre(typ, oz_name, cc_name, with_declaration):
                                                           temp_oz_field_name,
                                                           cc_name + '.' + field_name,
                                                           with_declaration=False))
+
+        cc_statements.append('}')
         return cc_statements
 
     else:
@@ -242,73 +245,43 @@ def get_cc_function_definition(func_cursor, c_func_name):
 
     return (arg_proto, cc_statements)
 
-def create_datatype(struct_name, is_pointer):
+def create_datatype(struct_name):
     """
-    Create a Mozart/Oz DataType, given a C structure name. The DataType will be
-    created like this:
-
-    1. If the structure is incomplete, the parameter ``is_pointer`` should be
-       set to True. The generated DataType will then be based on a C pointer of
-       that structure.
-    2. Otherwise, ``is_pointer`` should be False, and the DataType will contain
-       the whole structure by value.
-
-    In both cases, the data type will contain a ``value()`` method to return the
-    pointer to the structure. The name of the DataType is
-    ``D_(name of C structure)``.
+    Create a Mozart/Oz DataType, given the name of an incomplete C structure.
+    The generated DataType will then be based on a C pointer of that structure.
+    The data type will contain a ``value()`` method to return the pointer to the
+    structure. The name of the DataType is ``D_(name of C structure)``.
     """
 
     params = {'s': struct_name}
 
-    statements = ["""
+    return ["""
         class D_%(s)s;
 
         #ifndef MOZART_GENERATOR
         #include "D_%(s)s-implem-decl.hh"
         #endif
-    """ % params, None, """
+
+        class D_%(s)s : public DataType<D_%(s)s>, StoredAs<%(s)s*>
+        {
+        public:
+            typedef SelfType<D_%(s)s>::Self Self;
+
+            D_%(s)s(%(s)s* value) : _value(value) {}
+
+            static void create(%(s)s*& self, VM vm, %(s)s* value) { self = value; }
+            static void create(%(s)s*& self, VM vm, GR gr, Self from) { self = from->_value; }
+
+            %(s)s* value() const { return _value; }
+
+        private:
+            %(s)s* _value;
+        };
+
         #ifndef MOZART_GENERATOR
         #include "%(s)s-implem-decl-after.hh"
         #endif
     """ % params]
-
-    if is_pointer:
-        statements[1] = """
-            class D_%(s)s : public DataType<D_%(s)s>, StoredAs<%(s)s*>
-            {
-            public:
-                typedef SelfType<D_%(s)s>::Self Self;
-
-                D_%(s)s(%(s)s* value) : _value(value) {}
-
-                static void create(%(s)s*& self, VM vm, %(s)s* value) { self = value; }
-                static void create(%(s)s*& self, VM vm, GR gr, Self from) { self = from->_value; }
-
-                %(s)s* value() const { return _value; }
-
-            private:
-                %(s)s* _value;
-            };
-        """ % params
-
-    else:
-        statements[1] = """
-            class D_%(s)s : public DataType<D_%(s)s>
-            {
-            public:
-                typedef SelfType<D_%(s)s>::Self Self;
-
-                D_%(s)s(VM vm, const %(s)s& value) : _value(value) {}
-                D_%(s)s(VM vm, GR gr, Self from) : _value(from->_value) {}
-
-                const %(s)s* value() const { return &_value; }
-
-            private:
-                %(s)s _value;
-            };
-        """ % params
-
-    return statements
 
 #-------------------------------------------------------------------------------
 
@@ -455,12 +428,12 @@ class Translator:
         """
         Collection the structures cursors.
         """
-        type_name = typedef.spelling.decode('utf-8')
         underlying_type = typedef.underlying_typedef_type
         if underlying_type.kind != TypeKind.UNEXPOSED:
             return
         if underlying_type.get_canonical().kind != TypeKind.RECORD:
             return
+        type_name = underlying_type.get_declaration().spelling.decode('utf-8')
         if type_name in BLACKLISTED_TYPEDEFS:
             return
         is_complete = underlying_type.get_declaration().is_definition()
@@ -472,7 +445,9 @@ class Translator:
         Print all structures as DataTypes.
         """
         for struct_name, is_complete in self._structs.items():
-            data_type = create_datatype(struct_name, not is_complete)
+            if is_complete:
+                continue
+            data_type = create_datatype(struct_name)
             self._types_decl_hh_file.writelines(data_type)
             self._types_hh_file.write('#include "D_%s-implem.hh"\n' % struct_name)
 
