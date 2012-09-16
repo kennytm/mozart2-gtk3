@@ -43,10 +43,17 @@ def strip_prefix_and_camelize(s):
 
         >>> strip_prefix_and_camelize("cairo_push_group_with_content")
         pushGroupWithContent
+
+    If the string has only one word, that word will be returned, e.g.::
+
+        >>> strip_prefix_and_camelize("cairo")
+        cairo
     """
     arr = s.split('_')
     if not arr[0]:
         arr = arr[1:]
+    if len(arr) == 1:
+        return arr[0]
     return arr[1] + ''.join(p.capitalize() for p in arr[2:])
 
 #-------------------------------------------------------------------------------
