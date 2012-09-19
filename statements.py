@@ -71,6 +71,12 @@ def create_out_statements_post(typ, cc_name, oz_name, with_declaration, context)
     raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
                               (cc_name, oz_name, typ.kind.spelling.decode('utf-8')))
 
+def create_node_out_statements_post(typ, cc_name, oz_name, with_declaration, context):
+    return ["""
+        auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(*(%(cc)s));
+        %(oz)s.init(vm, *%(u)s->first);
+    """ % {'oz':oz_name, 'cc':cc_name, 'u':unique_str()}]
+
 #-------------------------------------------------------------------------------
 # Pre actions:
 
@@ -131,7 +137,7 @@ def create_in_statements_pre(typ, oz_name, cc_name, with_declaration, context):
             struct = pointee.get_declaration()
             if not struct.is_definition():
                 struct_name = struct.spelling.decode('utf-8')
-                return ['%s = %s.as<D_%s>().value()' % (prefix, oz_name, struct_name)]
+                return ['%s = %s.as<D_%s>().value();' % (prefix, oz_name, struct_name)]
 
         cc_complete_name = unique_str()
         cc_statements = create_in_statements_pre(pointee,
@@ -157,11 +163,29 @@ def create_deref_declarations_pre(typ, oz_name, cc_name, with_declaration, conte
     cc_decl = to_cc(typ.get_pointee(), cc_complete_name)
     return ["%s; %s = &%s;" % (cc_decl, prefix, cc_complete_name)]
 
+def create_node_in_statements_pre(typ, oz_name, cc_name, with_declaration, context):
+    prefix = 'auto ' + cc_name if with_declaration else cc_name
+    return ["%s = new std::pair<ProtectedNode, VM>(ozProtect(vm, %s), vm);" % (prefix, oz_name)]
+
+def create_node_deleter_pre(typ, oz_name, cc_name, with_declaration, context):
+    prefix = 'auto ' + cc_name if with_declaration else cc_name
+    lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i)) for i, subtype in enumerate(typ.get_pointee().argument_types()))
+    return ["""
+        %(p)s = [](%(l)s) {
+            auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(x_lambda_%(n)s);
+            ozUnprotect(%(u)s->second, %(u)s->first);
+            delete %(u)s;
+        };
+    """ % {'p':prefix, 'l':lambda_args, 'u':unique_str(), 'n':context}]
+
 #-------------------------------------------------------------------------------
 
 STATEMENTS_CREATORS = {
     'in': (create_in_statements_pre, create_no_statements, 'In'),
     'out': (create_deref_declarations_pre, create_out_statements_post, 'Out'),
+    'node-in': (create_node_in_statements_pre, create_no_statements, 'In'),
+    'node-out': (create_deref_declarations_pre, create_node_out_statements_post, 'Out'),
+    'node-deleter': (create_node_deleter_pre, create_no_statements, None),
 }
 
 #-------------------------------------------------------------------------------
@@ -219,7 +243,7 @@ def get_cc_function_definition(func_cursor, c_func_name):
 
     arg_proto = ''.join(', ' + oz_inout + ' ' + oz_name
                         for _, oz_name, _, _, oz_inout, _ in arg_specs
-                        if oz_name != 'return')
+                        if oz_inout is not None and oz_name != 'return')
 
     return (arg_proto, cc_statements)
 
