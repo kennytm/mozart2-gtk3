@@ -2,99 +2,171 @@ from constants import *
 from common import *
 from fake_type import PointerOf
 from to_cc import to_cc
+from itertools import chain
 
-def create_no_statements(typ, name_1, name_2, with_declaration, context):
-    return []
+class StatementsCreator:
+    @property
+    def cc_name(self):
+        return self._cc_name
+
+    @cc_name.setter
+    def cc_name(self, name):
+        self._cc_name = name
+        self._cc_prefix = 'auto ' + name if self._with_declaration else name
+
+    @property
+    def oz_name(self):
+        return self._oz_name
+
+    @oz_name.setter
+    def oz_name(self, name):
+        self._oz_name = name
+        self._oz_prefix = 'auto ' + name if self._with_declaration else name
+
+    @property
+    def with_declaration(self):
+        return self._with_declaration
+
+    @with_declaration.setter
+    def with_declaration(self, with_decl):
+        self._with_declaration = with_decl
+        if not with_decl:
+            self._oz_prefix = self._oz_name
+            self._cc_prefix = self._cc_name
+        else:
+            self._oz_prefix = 'auto ' + self._oz_name
+            self._cc_prefix = 'auto ' + self._cc_name
+
+    def __copy__(self):
+        new_copy = type(self)()
+        new_copy._type = self._type
+        new_copy._cc_name = self._cc_name
+        new_copy._oz_name = self._oz_name
+        new_copy._with_declaration = self._with_declaration
+        new_copy._context = self._context
+        new_copy._cc_prefix = self._cc_prefix
+        new_copy._oz_prefix = self._oz_prefix
+        return new_copy
+
+    @property
+    def oz_inout(self):
+        return None
+
+    def pre(self):
+        cc_complete_name = unique_str()
+        cc_decl = to_cc(self._type.get_pointee(), cc_complete_name)
+        return ["%s; %s = &%s;" % (cc_decl, self._cc_prefix, cc_complete_name)]
+
+    def post(self):
+        return []
 
 #-------------------------------------------------------------------------------
-# Post actions:
+# "Out" type.
 
-def create_out_statements_post(typ, cc_name, oz_name, with_declaration, context):
-    """
-    Create a list of C++ declarations and statements encoding a C value into an
-    Oz UnstableNode.
-    """
-    prefix = 'auto ' + oz_name if with_declaration else oz_name
+class OutStatementsCreator(StatementsCreator):
+    @property
+    def oz_inout(self):
+        return 'Out'
 
-    if is_primitive_type(typ):
-        return [prefix + " = build(vm, " + cc_name + ");"]
+    def pre(self):
+        return super().pre()
 
-    elif is_c_string(typ):
-        prefix = 'auto ' if with_declaration else ''
-        return [prefix + " = String::build(vm, newLString(vm, toUTF<nchar>(makeLString(" + cc_name + ");"]
-
-    elif typ.kind == TypeKind.RECORD:
-        struct_decl = typ.get_declaration()
-        struct_name = struct_decl.spelling.decode('utf-8')
-
-        if struct_decl.is_definition():
-            cc_statements = []
-            temp_oz_names = []
-            field_names = []
-
-            record_name = strip_prefix_and_camelize(struct_name)
-            for decl in struct_decl.get_children():
-                subtype = decl.type
-                field_name = decl.spelling.decode('utf-8')
-                field_names.append(field_name)
-                temp_oz_name = unique_str()
-                temp_oz_names.append(temp_oz_name)
-                cc_statements.extend(create_out_statements_post(subtype,
-                                                                cc_name + "." + field_name,
-                                                                temp_oz_name,
-                                                                with_declaration=True,
-                                                                context=context))
-
-            field_names_concat = '"), MOZART_STR("'.join(field_names)
-            temp_oz_names_concat = '), std::move('.join(temp_oz_names)
-
-            cc_statements.append("""
-                %s = buildRecord(vm,
-                    buildArity(vm, MOZART_STR("%s"), MOZART_STR("%s")),
-                    std::move(%s)
-                );
-            """ % (prefix, record_name, field_names_concat, temp_oz_names_concat))
-
+    def post(self):
+        if is_primitive_type(self._type):
+            return self._decode_primitive_type()
+        elif is_c_string(self._type):
+            return self._decode_c_string()
+        elif self._type.kind == TypeKind.RECORD:
+            return self._decode_record()
+        elif self._type.kind == TypeKind.POINTER:
+            return self._decode_pointer()
         else:
-            return ["%s = D_%s::build(vm, &%s);" % (prefix, struct_name, cc_name)]
+            raise NotImplementedError('Not implemented to convert %s to %s' %
+                                      (to_cc(self._type, self._cc_name), self._oz_name))
+
+    def _decode_primitive_type(self):
+        return [self._oz_prefix + " = build(vm, " + self._cc_name + ");"]
+
+    def _decode_c_string(self):
+        return [self._oz_prefix +
+                " = String::build(vm, newLString(vm, toUTF<nchar>(makeLString(" +
+                self._cc_name + ");"]
+
+    def _decode_record(self):
+        struct_decl = self._type.get_declaration()
+        if struct_decl.is_definition():
+            return self._decode_struct(struct_decl)
+        else:
+            struct_name = struct_decl.spelling.decode('utf-8')
+            return ["%s = D_%s::build(vm, &%s);" % (self._oz_prefix, struct_name, self._cc_name)]
+
+    def _decode_struct(self, struct_decl):
+        cc_statements = []
+        oz_temp_names = []
+        field_names = []
+
+        creator = self.__copy__()
+        creator._with_declaration = True
+
+        for decl in struct_decl.get_children():
+            subtype = decl.type
+            field_name = decl.spelling.decode('utf-8')
+            field_names.append(field_name)
+            oz_temp_name = unique_str()
+            oz_temp_names.append(oz_temp_name)
+
+            creator._type = subtype
+            creator.cc_name = self._cc_name + "." + field_name
+            creator.oz_name = oz_temp_name
+            cc_statements.extend(creator.post())
+
+        field_names_concat = '"), MOZART_STR("'.join(field_names)
+        oz_temp_names_concat = '), std::move('.join(oz_temp_names)
+
+        struct_name = struct_decl.spelling.decode('utf-8')
+        oz_record_name = strip_prefix_and_camelize(struct_name)
+
+        cc_statements.append("""
+            %s = buildRecord(vm,
+                buildArity(vm, MOZART_STR("%s"), MOZART_STR("%s")),
+                std::move(%s)
+            );
+        """ % (self._cc_prefix, oz_record_name, field_names_concat, oz_temp_names_concat))
 
         return cc_statements
 
-    elif typ.kind == TypeKind.POINTER:
-        cc_real_name = '(*(' + cc_name + '))'
-        return create_out_statements_post(typ.get_pointee(),
-                                          cc_real_name,
-                                          oz_name,
-                                          with_declaration,
-                                          context)
-
-    raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
-                              (cc_name, oz_name, typ.kind.spelling.decode('utf-8')))
-
-def create_node_out_statements_post(typ, cc_name, oz_name, with_declaration, context):
-    return ["""
-        auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(*(%(cc)s));
-        %(oz)s.init(vm, *%(u)s->first);
-    """ % {'oz':oz_name, 'cc':cc_name, 'u':unique_str()}]
+    def _decode_pointer(self):
+        creator = self.__copy__()
+        creator._type = self._type.get_pointee()
+        creator.cc_name = '(*(' + self._cc_name + '))'
+        return creator.post()
 
 #-------------------------------------------------------------------------------
-# Pre actions:
+# "In" type.
 
-def create_in_statements_pre(typ, oz_name, cc_name, with_declaration, context):
-    """
-    Create a list of C++ statements decoding an Oz RichNode into a C value. The
-    target variable must already been declared.
-    """
-    prefix = 'auto ' + cc_name if with_declaration else cc_name
+class InStatementsCreator(StatementsCreator):
+    @property
+    def oz_inout(self):
+        return 'In'
 
-    if is_c_string(typ):
-        return ["""
-            auto %(unique)s = vsToString<char>(vm, %(oz)s);
-            %(cc)s = %(uniq)s.c_str();
-        """ % {'cc': prefix, 'oz': oz_name, 'unique': unique_str()}]
+    def post(self):
+        return super().post()
 
-    elif is_primitive_type(typ):
-        kind = typ.kind
+    def pre(self):
+        if is_primitive_type(self._type):
+            return self._encode_primitive_type()
+        elif is_c_string(self._type):
+            return self._encode_c_string()
+        elif self._type.kind == TypeKind.RECORD:
+            return self._encode_record()
+        elif self._type.kind == TypeKind.POINTER:
+            return self._encode_pointer()
+        else:
+            raise NotImplementedError('Not implemented to convert %s to %s' %
+                                      (self._oz_name, to_cc(self._type, self._cc_name)))
+
+    def _encode_primitive_type(self):
+        kind = self._type.kind
         if kind == TypeKind.BOOL:
             interface = "BoolValue"
             method = "boolValue"
@@ -104,108 +176,136 @@ def create_in_statements_pre(typ, oz_name, cc_name, with_declaration, context):
         elif kind in FLOAT_KINDS:
             interface = "FloatValue"
             method = "floatValue"
+        return ['%s = %s(%s).%s(vm);' % (self._cc_prefix, interface, self._oz_name, method)]
 
-        return ['%s = %s(%s).%s(vm);' % (prefix, interface, oz_name, method)]
+    def _encode_c_string(self):
+        return ["""
+            auto %(u)s = vsToString<char>(vm, %(oz)s);
+            %(cc)s = %(u)s.c_str();
+        """ % {'cc': self._cc_prefix, 'oz': self._oz_name, 'u': unique_str()}]
 
-    elif typ.kind == TypeKind.RECORD:
+    def _encode_record(self):
         temp_interface_name = unique_str()
-        struct_decl = typ.get_declaration()
+        struct_decl = self._type.get_declaration()
         struct_name = struct_decl.spelling.decode('utf-8')
 
-        cc_statements = ["Dottable %s(%s);" % (temp_interface_name, oz_name)]
-        if with_declaration:
-            cc_statements.append(struct_name + ' ' + cc_name + ';')
+        cc_statements = ["Dottable %s(%s);" % (temp_interface_name, self._oz_name)]
+        if self._with_declaration:
+            cc_statements.append(struct_name + ' ' + self._cc_name + ';')
+
+        creator = self.__copy__()
+        creator._with_declaration = False
 
         for decl in struct_decl.get_children():
             subtype = decl.type
             field_name = decl.spelling.decode('utf-8')
-            temp_oz_field_name = unique_str()
+            oz_temp_field_name = unique_str()
             cc_statements.append("""
                 auto %s = %s.dot(vm, build(vm, MOZART_STR("%s")));
-            """ % (temp_oz_field_name, temp_interface_name, field_name))
-            cc_statements.extend(create_in_statements_pre(subtype,
-                                                          temp_oz_field_name,
-                                                          cc_name + '.' + field_name,
-                                                          with_declaration=False,
-                                                          context=context))
+            """ % (oz_temp_field_name, temp_interface_name, field_name))
+
+            creator._type = subtype
+            creator.oz_name = oz_temp_field_name
+            creator.cc_name = self._cc_name + '.' + field_name
+            cc_statements.extend(creator.pre())
+
         return cc_statements
 
-    elif typ.kind == TypeKind.POINTER:
-        pointee = typ.get_pointee().get_canonical()
+    def _encode_pointer(self):
+        pointee = self._type.get_pointee().get_canonical()
         kind = pointee.kind
         if kind == TypeKind.RECORD:
             struct = pointee.get_declaration()
             if not struct.is_definition():
                 struct_name = struct.spelling.decode('utf-8')
-                return ['%s = %s.as<D_%s>().value();' % (prefix, oz_name, struct_name)]
+                return ["""
+                    %s = %s.as<D_%s>().value();
+                """ % (self._cc_prefix, self._oz_name, struct_name)]
 
         cc_complete_name = unique_str()
-        cc_statements = create_in_statements_pre(pointee,
-                                                 oz_name,
-                                                 cc_complete_name,
-                                                 with_declaration=True,
-                                                 context=context)
-        cc_statements.append('%s = &%s;' % (prefix, cc_complete_name))
+
+        creator = self.__copy__()
+        creator._type = pointee
+        creator._cc_name = cc_complete_name
+        creator.with_declaration = True
+
+        cc_statements = creator.pre()
+        cc_statements.append(self._cc_prefix + ' = &' + cc_complete_name + ';')
         return cc_statements
 
+#-------------------------------------------------------------------------------
+# 'NodeOut' type
 
-    raise NotImplementedError('Not implemented to convert %s to %s with TypeKind %s' %
-                              (oz_name, cc_name, typ.kind.spelling.decode('utf-8')))
+class NodeOutStatementsCreator(StatementsCreator):
+    @property
+    def oz_inout(self):
+        return 'Out'
 
+    def post(self):
+        return ["""
+            auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(*(%(cc)s));
+            %(oz)s = UnstableNode(vm, *%(u)s->first);
+        """ % {'oz':self._oz_prefix, 'cc':self._cc_name, 'u':unique_str()}]
 
-def create_deref_declarations_pre(typ, oz_name, cc_name, with_declaration, context):
-    """
-    Create a declaration for arguments accepting a C++ pointer as an output
-    argument.
-    """
-    prefix = 'auto ' + cc_name if with_declaration else cc_name
-    cc_complete_name = unique_str()
-    cc_decl = to_cc(typ.get_pointee(), cc_complete_name)
-    return ["%s; %s = &%s;" % (cc_decl, prefix, cc_complete_name)]
+#-------------------------------------------------------------------------------
+# 'NodeIn' type
 
-def create_node_in_statements_pre(typ, oz_name, cc_name, with_declaration, context):
-    prefix = 'auto ' + cc_name if with_declaration else cc_name
-    return ["%s = new std::pair<ProtectedNode, VM>(ozProtect(vm, %s), vm);" % (prefix, oz_name)]
+class NodeInStatementsCreator(InStatementsCreator):
+    @property
+    def oz_inout(self):
+        return 'In'
 
-def create_node_deleter_pre(typ, oz_name, cc_name, with_declaration, context):
-    prefix = 'auto ' + cc_name if with_declaration else cc_name
-    lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i)) for i, subtype in enumerate(typ.get_pointee().argument_types()))
-    return ["""
-        %(p)s = [](%(l)s) {
-            auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(x_lambda_%(n)s);
-            ozUnprotect(%(u)s->second, %(u)s->first);
-            delete %(u)s;
-        };
-    """ % {'p':prefix, 'l':lambda_args, 'u':unique_str(), 'n':context}]
+    def pre(self):
+        return ["""
+            %s = new std::pair<ProtectedNode, VM>(ozProtect(vm, %s), vm);
+        """ % (self._cc_prefix, self._oz_name)]
+
+#-------------------------------------------------------------------------------
+# 'NodeDeleter' type
+
+class NodeDeleterStatementsCreator(InStatementsCreator):
+    def pre(self):
+        lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i))
+                                for i, subtype in enumerate(self._type.get_pointee().argument_types()))
+        return ["""
+            %(p)s = [](%(l)s) {
+                auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(x_lambda_%(n)s);
+                ozUnprotect(%(u)s->second, %(u)s->first);
+                delete %(u)s;
+            };
+        """ % {'p':self._cc_prefix, 'l':lambda_args, 'u':unique_str(), 'n':self._context}]
 
 #-------------------------------------------------------------------------------
 
-STATEMENTS_CREATORS = {
-    'in': (create_in_statements_pre, create_no_statements, 'In'),
-    'out': (create_deref_declarations_pre, create_out_statements_post, 'Out'),
-    'node-in': (create_node_in_statements_pre, create_no_statements, 'In'),
-    'node-out': (create_deref_declarations_pre, create_node_out_statements_post, 'Out'),
-    'node-deleter': (create_node_deleter_pre, create_no_statements, None),
-}
-
-#-------------------------------------------------------------------------------
-
-def get_arg_spec(func_cursor, c_func_name):
+def get_statement_creators(func_cursor, c_func_name):
     inouts = SPECIAL_INOUTS.get(c_func_name, {})
+    globals_dict = globals()
+
+    def decode_inout(arg_name, default, real_arg_name, typ):
+        inout_tuple = inouts.get(arg_name, (default, None))
+        if isinstance(inout_tuple, str):
+            inout = inout_tuple
+            context = None
+        else:
+            (inout, context) = inout_tuple
+        creator = globals_dict[inout + 'StatementsCreator']()
+        creator._context = context
+        creator._oz_name = real_arg_name
+        creator._cc_name = 'x_cc_' + real_arg_name
+        creator._type = typ
+        return creator
 
     for arg in func_cursor.get_children():
         if arg.kind != CursorKind.PARM_DECL:
             continue
+
         arg_name = arg.spelling.decode('utf-8')
-        (inout, context) = inouts.get(arg_name, ('in', None))
-        (stc_pre, stc_post, oz_inout) = STATEMENTS_CREATORS[inout]
-        yield (arg.type.get_canonical(), arg_name, stc_pre, stc_post, oz_inout, context)
+        yield decode_inout(arg_name, 'In', arg_name, arg.type.get_canonical())
+
 
     return_type = func_cursor.result_type.get_canonical()
     if return_type.kind != TypeKind.VOID:
-        (inout, context) = inouts.get('return', ('out', None))
-        (stc_pre, stc_post, oz_inout) = STATEMENTS_CREATORS[inout]
-        yield (PointerOf(return_type), '_x_oz_return', stc_pre, stc_post, oz_inout, context)
+        yield decode_inout('return', 'Out', '_x_oz_return', PointerOf(return_type))
 
 
 def get_cc_function_definition(func_cursor, c_func_name):
@@ -216,34 +316,28 @@ def get_cc_function_definition(func_cursor, c_func_name):
     list of C++ statements of the built-in procedure.
     """
 
-    arg_specs = list(get_arg_spec(func_cursor, c_func_name))
+    creators = list(get_statement_creators(func_cursor, c_func_name))
 
-    cc_names = []
     cc_statements = []
 
-    for typ, oz_name, stc_pre, _, _, context in arg_specs:
-        cc_name = '_x_cc_' + oz_name
-        cc_names.append(cc_name)
-        if stc_pre is not None:
-            cc_statements.extend(stc_pre(typ, oz_name, cc_name,
-                                         with_declaration=True,
-                                         context=context))
+    for creator in creators:
+        creator.with_declaration = True
+        cc_statements.extend(creator.pre())
 
-    call_statement = c_func_name + '(' + ', '.join(cc_names) + ');'
+    call_args = (creator.cc_name for creator in creators
+                                 if creator.oz_name != '_x_oz_return')
+    call_statement = c_func_name + '(' + ', '.join(call_args) + ');'
     if func_cursor.result_type.get_canonical().kind != TypeKind.VOID:
         call_statement = '*_x_cc__x_oz_return = ' + call_statement
     cc_statements.append(call_statement)
 
-    for typ, oz_name, _, stc_post, _, context in arg_specs:
-        cc_name = '_x_cc_' + oz_name
-        if stc_post is not None:
-            cc_statements.extend(stc_post(typ, cc_name, oz_name,
-                                          with_declaration=False,
-                                          context=context))
+    for creator in creators:
+        creator.with_declaration = False
+        cc_statements.extend(creator.post())
 
-    arg_proto = ''.join(', ' + oz_inout + ' ' + oz_name
-                        for _, oz_name, _, _, oz_inout, _ in arg_specs
-                        if oz_inout is not None and oz_name != 'return')
+    arg_proto = ''.join(', ' + creator.oz_inout + ' ' + creator.oz_name
+                        for creator in creators
+                        if creator.oz_inout is not None and creator.oz_name != 'return')
 
     return (arg_proto, cc_statements)
 
