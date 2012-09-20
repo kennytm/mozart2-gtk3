@@ -1,4 +1,5 @@
 from common import *
+from constants import *
 
 def common_unbuild_functions():
     for int_type in ['char', 'signed char', 'unsigned char', 'short',
@@ -22,7 +23,7 @@ def common_unbuild_functions():
     yield """
         static void unbuild(VM vm, RichNode oz, bool& cc)
         {
-            cc = BoolValue(oz).boolValue(vm);
+            cc = BooleanValue(oz).boolValue(vm);
         }
 
         static void unbuild(VM vm, RichNode oz, const char*& cc)
@@ -44,20 +45,22 @@ def common_unbuild_functions():
 
 def struct_builder(struct_decl):
     struct_name = struct_decl.spelling.decode('utf-8')
+    if struct_name in BLACKLISTED_TYPEDEFS:
+        return ""
 
     if struct_decl.is_definition():
         field_names = [field.spelling.decode('utf-8') for field in struct_decl.get_children()]
         field_names_concat = '"), MOZART_STR("'.join(field_names)
         sub_builders_concat = '), build(vm, cc.'.join(field_names)
         extractors_concat = ''.join("""
-            unbuild(vm, dottable.dot(vm, Atom::build(vm, MOZART_STR("%(f)s")), cc.%(f)s);
+            unbuild(vm, dottable.dot(vm, Atom::build(vm, MOZART_STR("%(f)s"))), cc.%(f)s);
         """ % {'f':f} for f in field_names)
 
         return """
             static UnstableNode build(VM vm, const %(s)s& cc)
             {
                 return buildRecord(vm,
-                    buildArity(vm, MOZART_STR("%(ss)s"), MOZART_STR("%(f)s"),
+                    buildArity(vm, MOZART_STR("%(ss)s"), MOZART_STR("%(f)s")),
                     build(vm, cc.%(b)s)
                 );
             }

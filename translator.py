@@ -23,31 +23,54 @@ def create_datatype(struct_name):
     params = {'s': struct_name}
 
     return ["""
-        class D_%(s)s;
-
-        #ifndef MOZART_GENERATOR
-        #include "D_%(s)s-implem-decl.hh"
-        #endif
-
-        class D_%(s)s : public DataType<D_%(s)s>, StoredAs<%(s)s*>
+        namespace m2g3
         {
-        public:
-            typedef SelfType<D_%(s)s>::Self Self;
+            class D_%(s)s;
+        }
 
-            D_%(s)s(%(s)s* value) : _value(value) {}
+        namespace mozart
+        {
+            using m2g3::D_%(s)s;
 
-            static void create(%(s)s*& self, VM vm, %(s)s* value) { self = value; }
-            static void create(%(s)s*& self, VM vm, GR gr, Self from) { self = from->_value; }
+            #ifndef MOZART_GENERATOR
+            #include "D_%(s)s-implem-decl.hh"
+            #endif
+        }
 
-            %(s)s* value() const { return _value; }
+        namespace m2g3
+        {
+            class D_%(s)s : public ::mozart::DataType<D_%(s)s>, ::mozart::StoredAs<%(s)s*>
+            {
+            public:
+                typedef ::mozart::SelfType<D_%(s)s>::Self Self;
 
-        private:
-            %(s)s* _value;
-        };
+                D_%(s)s(%(s)s* value) : _value(value) {}
 
-        #ifndef MOZART_GENERATOR
-        #include "%(s)s-implem-decl-after.hh"
-        #endif
+                static void create(%(s)s*& self, ::mozart::VM vm, %(s)s* value)
+                {
+                    self = value;
+                }
+                static void create(%(s)s*& self, ::mozart::VM vm, ::mozart::GR gr, Self from)
+                {
+                    self = from->_value;
+                }
+
+                %(s)s* value() const { return _value; }
+
+            private:
+                %(s)s* _value;
+            };
+        }
+
+        namespace mozart {
+
+            using m2g3::D_%(s)s;
+
+            #ifndef MOZART_GENERATOR
+            #include "D_%(s)s-implem-decl-after.hh"
+            #endif
+
+        }
     """ % params]
 
 #-------------------------------------------------------------------------------
@@ -91,6 +114,7 @@ class Translator:
             'mod': self._module,
             'hh-file': self._module,
             'hh-ext': HH_EXT,
+            'types-decl-hh-ext': TYPES_DECL_HH_EXT,
             'common-header': """
                 #include <mozart.hh>
 
@@ -114,8 +138,9 @@ class Translator:
 
         self._cc_file.write("""
             #include "%(hh-file)s%(hh-ext)s"
+            #include "%(mod)s%(types-decl-hh-ext)s"
 
-            namespace m2g3 {
+            %(common-header)s
 
         """ % format_params)
 
@@ -125,7 +150,8 @@ class Translator:
             #ifndef %(guard)s_DATATYPES_DECL
             #define %(guard)s_DATATYPES_DECL
 
-            %(common-header)s
+            #include "../c-files/%(mod)s.c"
+            #include <mozart.hh>
         """ % format_params)
 
         self._types_hh_file.write("""
@@ -153,8 +179,6 @@ class Translator:
         """)
 
         self._types_decl_hh_file.write("""
-            }
-
             #endif
         """)
 

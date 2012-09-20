@@ -5,6 +5,8 @@
 *.o
 *.out
 *.out.*
+*.ast
+*.astbi
 __pycache__
 .coverage
 htmlcov
