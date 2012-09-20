@@ -113,6 +113,7 @@ KIND_MAP = {
     TypeKind.FUNCTIONPROTO: convert_function,
     TypeKind.RECORD: convert_canonical,
     TypeKind.OBJCINTERFACE: convert_canonical,
+    TypeKind.ENUM: convert_canonical,
 }
 
 def convert(typ):

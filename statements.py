@@ -72,14 +72,19 @@ class OutStatementsCreator(StatementsCreator):
         return super().pre()
 
     def post(self):
+        type_kind = self._type.kind
         if is_primitive_type(self._type):
             return self._decode_primitive_type()
         elif is_c_string(self._type):
             return self._decode_c_string()
-        elif self._type.kind == TypeKind.RECORD:
+        elif type_kind == TypeKind.RECORD:
             return self._decode_record()
-        elif self._type.kind == TypeKind.POINTER:
+        elif type_kind == TypeKind.POINTER:
             return self._decode_pointer()
+        elif type_kind == TypeKind.ENUM:
+            return self._decode_enum()
+        elif type_kind == TypeKind.TYPEDEF:
+            return self._decode_canonical()
         else:
             raise NotImplementedError('Not implemented to convert %s to %s' %
                                       (to_cc(self._type, self._cc_name), self._oz_name))
@@ -131,7 +136,43 @@ class OutStatementsCreator(StatementsCreator):
                 buildArity(vm, MOZART_STR("%s"), MOZART_STR("%s")),
                 std::move(%s)
             );
-        """ % (self._cc_prefix, oz_record_name, field_names_concat, oz_temp_names_concat))
+        """ % (self._oz_prefix, oz_record_name, field_names_concat, oz_temp_names_concat))
+
+        return cc_statements
+
+    def _decode_enum(self):
+        enum_decl = self._type.get_declaration()
+        cc_enum_names = [enum.spelling.decode('utf-8') for enum in enum_decl.get_children()]
+        atom_names = strip_common_prefix_and_camelize(cc_enum_names)
+
+        cc_atom_name = unique_str();
+        cc_atom_length_name = unique_str();
+
+        cc_statements = ["""
+             const nchar* %s;
+             size_t %s;
+             switch (%s)
+             {
+        """ % (cc_atom_name, cc_atom_length_name, self._cc_name)]
+
+        for cc_enum_name, atom_name in zip(cc_enum_names, atom_names):
+            cc_statements.append("""
+                case %s:
+                    %s = MOZART_STR("%s");
+                    %s = %s;
+                    break;
+            """ % (cc_enum_name, cc_atom_name, atom_name, cc_atom_length_name, len(atom_name)))
+
+        cc_statements.append("""
+                default:
+                    %(a)s = nullptr;
+                    break;
+            }
+
+            %(oz)s = (%(a)s != nullptr) ?
+                        Atom::build(vm, %(a)s, %(l)s) :
+                        SmallInt::build(vm, %(cc)s);
+        """ % {'a':cc_atom_name, 'l':cc_atom_length_name, 'oz':self._oz_prefix, 'cc':self._cc_name})
 
         return cc_statements
 
@@ -139,6 +180,11 @@ class OutStatementsCreator(StatementsCreator):
         creator = self.__copy__()
         creator._type = self._type.get_pointee()
         creator.cc_name = '(*(' + self._cc_name + '))'
+        return creator.post()
+
+    def _decode_canonical(self):
+        creator = self.__copy__()
+        creator._type = self._type.get_canonical()
         return creator.post()
 
 #-------------------------------------------------------------------------------
@@ -153,14 +199,19 @@ class InStatementsCreator(StatementsCreator):
         return super().post()
 
     def pre(self):
+        type_kind = self._type.kind
         if is_primitive_type(self._type):
             return self._encode_primitive_type()
         elif is_c_string(self._type):
             return self._encode_c_string()
-        elif self._type.kind == TypeKind.RECORD:
+        elif type_kind == TypeKind.RECORD:
             return self._encode_record()
-        elif self._type.kind == TypeKind.POINTER:
+        elif type_kind == TypeKind.POINTER:
             return self._encode_pointer()
+        elif type_kind == TypeKind.ENUM:
+            return self._encode_enum()
+        elif type_kind == TypeKind.TYPEDEF:
+            return self._encode_canonical()
         else:
             raise NotImplementedError('Not implemented to convert %s to %s' %
                                       (self._oz_name, to_cc(self._type, self._cc_name)))
@@ -232,6 +283,49 @@ class InStatementsCreator(StatementsCreator):
         cc_statements = creator.pre()
         cc_statements.append(self._cc_prefix + ' = &' + cc_complete_name + ';')
         return cc_statements
+
+    def _encode_enum(self):
+        enum_decl = self._type.get_declaration()
+        enum_name = enum_decl.spelling.decode('utf-8')
+        cc_enum_names = [enum.spelling.decode('utf-8') for enum in enum_decl.get_children()]
+        atom_names = strip_common_prefix_and_camelize(cc_enum_names)
+
+        cc_string_name = unique_str()
+        cc_map_name = unique_str()
+
+        cc_atom_name = unique_str()
+        cc_atom_length_name = unique_str()
+
+        cc_statements = ["""
+            auto %s = vsToString(%s);
+            static const std::unordered_map<std::basic_string<nchar>, %s> %s = {
+        """ % (cc_atom_name, self._oz_name, enum_name, cc_map_name)]
+
+        cc_statements.extend('{MOZART_STR("' + atom_name + '"), ' + cc_enum_name + '},'
+                             for cc_enum_name, atom_name in zip(cc_enum_names, atom_names))
+
+        cc_statements.append("""
+            };
+
+            auto %(i)s = %(m)s.find(%(a)s);
+            %(cc)s = (%(i)s != %(m)s.end()) ?
+                        %(i)s->second :
+                        (%(e)s) IntegerValue(%(oz)s).intValue(vm);
+        """ % {
+            'i': unique_str(),
+            'm': cc_map_name,
+            'a': cc_atom_name,
+            'cc': self._cc_prefix,
+            'e': enum_name,
+            'oz': self._oz_name,
+        })
+
+        return cc_statements
+
+    def _encode_canonical(self):
+        creator = self.__copy__()
+        creator._type = self._type.get_canonical()
+        return creator.pre()
 
 #-------------------------------------------------------------------------------
 # 'NodeOut' type

@@ -29,13 +29,9 @@ def unique_str():
     _unique_str_counter += 1
     return '_x_' + str(_unique_str_counter)
 
-
-def capitalize(s):
-    """
-    Captialize a string without causing the other characters to become
-    lowercase.
-    """
-    return s[0].upper() + s[1:]
+def camelize(s):
+    arr = s.split('_')
+    return arr[0].lower() + ''.join(p.capitalize() for p in arr[1:])
 
 def strip_prefix_and_camelize(s):
     """
@@ -49,12 +45,37 @@ def strip_prefix_and_camelize(s):
         >>> strip_prefix_and_camelize("cairo")
         cairo
     """
-    arr = s.split('_')
-    if not arr[0]:
-        arr = arr[1:]
-    if len(arr) == 1:
-        return arr[0]
-    return arr[1] + ''.join(p.capitalize() for p in arr[2:])
+    first_underscore = s.find('_', 1)
+    if first_underscore == -1:
+        if s.startswith('_'):
+            s = s[1:]
+        return s.lower()
+    else:
+        return camelize(s[first_underscore+1:])
+
+
+def strip_common_prefix_and_camelize(lst):
+    """
+    Remove the common prefix of a list of strings, and change it to CamelCase,
+    e.g.::
+
+        >>> strip_common_prefix_and_camelize(["CAIRO_OPERATOR_DEST_OVER",
+        ...                                   "CAIRO_OPERATOR_DEST_ATOP",
+        ...                                   "CAIRO_OPERATOR_DIFFERENCE"])
+        ['destOver', 'destAtop', 'difference']
+
+    """
+    min_str = min(lst)
+    max_str = max(lst)
+    strip_start = len(min_str)
+
+    for i, c in enumerate(min_str):
+        if c != max_str[i]:
+            break
+        if c == '_':
+            strip_start = i+1
+
+    return [camelize(s[strip_start:]) for s in lst]
 
 #-------------------------------------------------------------------------------
 
