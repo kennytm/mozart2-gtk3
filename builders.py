@@ -53,7 +53,11 @@ def struct_builder(struct_decl):
         field_names_concat = '"), MOZART_STR("'.join(field_names)
         sub_builders_concat = '), build(vm, cc.'.join(field_names)
         extractors_concat = ''.join("""
-            unbuild(vm, dottable.dot(vm, Atom::build(vm, MOZART_STR("%(f)s"))), cc.%(f)s);
+            {
+                auto label = Atom::build(vm, MOZART_STR("%(f)s"));
+                auto field = dottable.dot(vm, label);
+                unbuild(vm, field, cc.%(f)s);
+            }
         """ % {'f':f} for f in field_names)
 
         return """
