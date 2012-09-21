@@ -116,9 +116,14 @@ class NodeInStatementsCreator(InStatementsCreator):
 # 'NodeDeleter' type
 
 class NodeDeleterStatementsCreator(InStatementsCreator):
+    @property
+    def oz_inout(self):
+        return None
+
     def pre(self):
+        args = self._type.get_canonical().get_pointee().argument_types()
         lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i))
-                                for i, subtype in enumerate(self._type.get_pointee().argument_types()))
+                                for i, subtype in enumerate(args))
         return """
             %(p)s = [](%(l)s) {
                 auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(x_lambda_%(n)s);
@@ -134,12 +139,20 @@ def get_statement_creators(func_cursor, c_func_name):
     globals_dict = globals()
 
     def decode_inout(arg_name, default, real_arg_name, typ):
-        inout_tuple = inouts.get(arg_name, (default, None))
+        inout_tuple = default
+        try:
+            inout_tuple = inouts[arg_name]
+        except KeyError:
+            if typ.kind == TypeKind.TYPEDEF:
+                type_name = name_of(typ.get_declaration())
+                inout_tuple = SPECIAL_INOUTS_FOR_TYPES.get(type_name, default)
+
         if isinstance(inout_tuple, str):
             inout = inout_tuple
             context = None
         else:
             (inout, context) = inout_tuple
+
         creator = globals_dict[inout + 'StatementsCreator']()
         creator._context = context
         creator._oz_name = real_arg_name
@@ -152,7 +165,7 @@ def get_statement_creators(func_cursor, c_func_name):
             continue
 
         arg_name = name_of(arg)
-        yield decode_inout(arg_name, 'In', arg_name, arg.type.get_canonical())
+        yield decode_inout(arg_name, 'In', arg_name, arg.type)
 
 
     return_type = func_cursor.result_type.get_canonical()

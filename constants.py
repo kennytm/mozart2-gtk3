@@ -5,7 +5,11 @@ BLACKLISTED = {
 
 SPECIAL_INOUTS = {
     'cairo_get_user_data': {'return': 'NodeOut'},
-    'cairo_set_user_data': {'user_data': 'NodeIn', 'destroy': ('NodeDeleter', 0)},
+    'cairo_set_user_data': {'user_data': 'NodeIn'},
+}
+
+SPECIAL_INOUTS_FOR_TYPES = {
+    'cairo_destroy_func_t': ('NodeDeleter', 0),
 }
 
 SPECIAL_TYPES = {
