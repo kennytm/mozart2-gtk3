@@ -41,6 +41,19 @@ def common_unbuild_functions():
         {
             return build(vm, *ptr);
         }
+
+        template <typename T>
+        static UnstableNode buildDynamicList(VM vm, T* array, size_t count)
+        {
+            UnstableNode list = buildNil(vm);
+            while (count > 0)
+            {
+                -- count;
+                auto head = build(vm, array[count]);
+                list = Cons::build(head, list);
+            }
+            return list;
+        }
     """
 
 def struct_builder(struct_decl):
@@ -134,5 +147,25 @@ def enum_builder(enum_decl):
         'c': cases,
         'e': entries
     }
+
+def builder(type_node):
+    type_name = type_node.spelling.decode('utf-8')
+
+    try:
+        (build, unbuild) = SPECIAL_TYPES[type_name]
+
+    except KeyError:
+        if type_node.kind == CursorKind.STRUCT_DECL:
+            return struct_builder(type_node)
+        elif type_node.kind == CursorKind.ENUM_DECL:
+            return enum_builder(type_node)
+
+    else:
+        res = []
+        if build:
+            res.append("static UnstableNode build(VM vm, const %s& cc) { %s }" % (type_name, build))
+        if unbuild:
+            res.append("static void unbuild(VM vm, RichNode oz, %s& cc) { %s }" % (type_name, unbuild))
+        return "\n".join(res)
 
 

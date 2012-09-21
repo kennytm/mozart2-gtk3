@@ -199,10 +199,7 @@ class Translator:
         """
         Print a single type.
         """
-        if type_node.kind == CursorKind.STRUCT_DECL:
-            self._cc_file.write(struct_builder(type_node))
-        elif type_node.kind == CursorKind.ENUM_DECL:
-            self._cc_file.write(enum_builder(type_node))
+        self._cc_file.write(builder(type_node))
 
     def _print_function(self, function):
         """
@@ -278,7 +275,8 @@ class Translator:
         for node in tu.cursor.get_children():
             kind = node.kind
             if kind == CursorKind.FUNCTION_DECL:
-                functions.append(node)
+                if node.spelling.decode('utf-8') not in BLACKLISTED_FUNCTIONS:
+                    functions.append(node)
             elif kind == CursorKind.TYPEDEF_DECL:
                 self._collect_typedef(node)
             elif kind in {CursorKind.STRUCT_DECL, CursorKind.ENUM_DECL}:
