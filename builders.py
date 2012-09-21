@@ -58,7 +58,7 @@ def common_unbuild_functions():
 
 def struct_builder(struct_decl):
     struct_name = name_of(struct_decl)
-    if struct_name in BLACKLISTED_TYPEDEFS:
+    if struct_name in BLACKLISTED:
         return ""
 
     if struct_decl.is_definition():

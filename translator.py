@@ -92,7 +92,6 @@ class Translator:
         self._hh_file = open(join(SRC, module + HH_EXT), 'w')
         self._types_hh_file = open(join(SRC, module + TYPES_HH_EXT), 'w')
         self._types_decl_hh_file = open(join(SRC, module + TYPES_DECL_HH_EXT), 'w')
-        self._typedefs = {}
 
     def _all_files(self):
         return [self._cc_file, self._hh_file,
@@ -201,6 +200,12 @@ class Translator:
         """
         self._cc_file.write(builder(type_node))
 
+        if type_node.kind == CursorKind.STRUCT_DECL and not type_node.is_definition() \
+                and name_of(type_node) not in BLACKLISTED:
+            (decl_hh, hh) = create_datatype(name_of(type_node))
+            self._types_decl_hh_file.writelines(decl_hh)
+            self._types_hh_file.write(hh)
+
     def _print_function(self, function):
         """
         Print a single function.
@@ -235,33 +240,6 @@ class Translator:
             self._cc_file.write(statement)
         self._cc_file.write("}\n")
 
-    def _collect_typedef(self, typedef):
-        """
-        Collection the structures cursors.
-        """
-        underlying_type = typedef.underlying_typedef_type
-        if underlying_type.kind != TypeKind.UNEXPOSED:
-            return
-        if underlying_type.get_canonical().kind != TypeKind.RECORD:
-            return
-        type_name = underlying_type.get_declaration().spelling.decode('utf-8')
-        if type_name in BLACKLISTED_TYPEDEFS:
-            return
-        is_complete = underlying_type.get_declaration().is_definition()
-        if is_complete or type_name not in self._typedefs:
-            self._typedefs[type_name] = is_complete
-
-    def _print_structures(self):
-        """
-        Print all structures as DataTypes.
-        """
-        for struct_name, is_complete in self._typedefs.items():
-            if is_complete:
-                continue
-            (decl_hh, hh) = create_datatype(struct_name)
-            self._types_decl_hh_file.writelines(decl_hh)
-            self._types_hh_file.write(hh)
-
     def print(self):
         """
         Print everything into the files.
@@ -275,14 +253,11 @@ class Translator:
         for node in tu.cursor.get_children():
             kind = node.kind
             if kind == CursorKind.FUNCTION_DECL:
-                if name_of(node) not in BLACKLISTED_FUNCTIONS:
+                if name_of(node) not in BLACKLISTED:
                     functions.append(node)
-            elif kind == CursorKind.TYPEDEF_DECL:
-                self._collect_typedef(node)
             elif kind in {CursorKind.STRUCT_DECL, CursorKind.ENUM_DECL}:
                 types.append(node)
 
-        self._print_structures()
         for type_node in types:
             self._print_type(type_node)
         for function in functions:

@@ -1,8 +1,5 @@
-BLACKLISTED_TYPEDEFS = {
-    '__va_list_tag'
-}
-
-BLACKLISTED_FUNCTIONS = {
+BLACKLISTED = {
+    '__va_list_tag',
     'cairo_rectangle_list_destroy'  # we don't need to call this function at all.
 }
 
