@@ -22,7 +22,7 @@ def create_datatype(struct_name):
 
     params = {'s': struct_name}
 
-    return ["""
+    return ("""
         namespace m2g3
         {
             class D_%(s)s;
@@ -46,14 +46,8 @@ def create_datatype(struct_name):
 
                 D_%(s)s(%(s)s* value) : _value(value) {}
 
-                static void create(%(s)s*& self, ::mozart::VM vm, %(s)s* value)
-                {
-                    self = value;
-                }
-                static void create(%(s)s*& self, ::mozart::VM vm, ::mozart::GR gr, Self from)
-                {
-                    self = from->_value;
-                }
+                static void create(%(s)s*& self, ::mozart::VM vm, %(s)s* value) {self = value; }
+                static inline void create(%(s)s*& self, ::mozart::VM vm, ::mozart::GR gr, Self from);
 
                 %(s)s* value() const { return _value; }
 
@@ -71,7 +65,19 @@ def create_datatype(struct_name):
             #endif
 
         }
-    """ % params]
+    """ % params, """
+        namespace mozart {
+            using m2g3::D_%(s)s;
+            #include "D_%(s)s-implem.hh"
+        }
+
+        namespace m2g3 {
+            void D_%(s)s::create(%(s)s*& self, ::mozart::VM vm, ::mozart::GR gr, Self from)
+            {
+                self = from->_value;
+            }
+        }
+    """ % params)
 
 #-------------------------------------------------------------------------------
 
@@ -158,7 +164,7 @@ class Translator:
             #ifndef %(guard)s_DATATYPES
             #define %(guard)s_DATATYPES
 
-            %(common-header)s
+            #include "%(mod)s%(types-decl-hh-ext)s"
         """ % format_params)
 
 
@@ -254,9 +260,9 @@ class Translator:
         for struct_name, is_complete in self._typedefs.items():
             if is_complete:
                 continue
-            data_type = create_datatype(struct_name)
-            self._types_decl_hh_file.writelines(data_type)
-            self._types_hh_file.write('#include "D_%s-implem.hh"\n' % struct_name)
+            (decl_hh, hh) = create_datatype(struct_name)
+            self._types_decl_hh_file.writelines(decl_hh)
+            self._types_hh_file.write(hh)
 
     def print(self):
         """
