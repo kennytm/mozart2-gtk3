@@ -205,7 +205,7 @@ class Translator:
         """
         Print a single function.
         """
-        source_func_name = function.spelling.decode('utf-8')
+        source_func_name = name_of(function)
         try:
             (arg_proto, cc_statements) = get_cc_function_definition(function, source_func_name)
         except NotImplementedError as e:
@@ -275,7 +275,7 @@ class Translator:
         for node in tu.cursor.get_children():
             kind = node.kind
             if kind == CursorKind.FUNCTION_DECL:
-                if node.spelling.decode('utf-8') not in BLACKLISTED_FUNCTIONS:
+                if name_of(node) not in BLACKLISTED_FUNCTIONS:
                     functions.append(node)
             elif kind == CursorKind.TYPEDEF_DECL:
                 self._collect_typedef(node)

@@ -57,12 +57,12 @@ def common_unbuild_functions():
     """
 
 def struct_builder(struct_decl):
-    struct_name = struct_decl.spelling.decode('utf-8')
+    struct_name = name_of(struct_decl)
     if struct_name in BLACKLISTED_TYPEDEFS:
         return ""
 
     if struct_decl.is_definition():
-        field_names = [field.spelling.decode('utf-8') for field in struct_decl.get_children()]
+        field_names = [name_of(field) for field in struct_decl.get_children()]
         field_names_concat = '"), MOZART_STR("'.join(field_names)
         sub_builders_concat = '), build(vm, cc.'.join(field_names)
         extractors_concat = ''.join("""
@@ -107,7 +107,7 @@ def struct_builder(struct_decl):
         """ % {'s': struct_name}
 
 def enum_builder(enum_decl):
-    cc_enum_names = [enum.spelling.decode('utf-8') for enum in enum_decl.get_children()]
+    cc_enum_names = [name_of(enum) for enum in enum_decl.get_children()]
     atom_names = strip_common_prefix_and_camelize(cc_enum_names)
 
     cases = ''.join('case %s: return Atom::build(vm, MOZART_STR("%s"));\n' % t
@@ -143,14 +143,13 @@ def enum_builder(enum_decl):
             }
         }
     """ % {
-        's': enum_decl.spelling.decode('utf-8'),
+        's': name_of(enum_decl),
         'c': cases,
         'e': entries
     }
 
 def builder(type_node):
-    type_name = type_node.spelling.decode('utf-8')
-
+    type_name = name_of(type_node)
     try:
         (build, unbuild) = SPECIAL_TYPES[type_name]
 

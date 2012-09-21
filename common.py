@@ -1,4 +1,5 @@
-from clang.cindex import CursorKind, TypeKind
+import re
+from clang.cindex import CursorKind, TypeKind, Cursor
 
 C_FILES = 'c-files'
 C_EXT = '.c'
@@ -97,4 +98,18 @@ def is_primitive_type(typ):
     kind = typ.kind
     return kind == TypeKind.BOOL or kind in INTEGER_KINDS or kind in FLOAT_KINDS
 
+#-------------------------------------------------------------------------------
+
+rx = re.compile('[^a-zA-Z0-9_]|_(?=_)')
+
+def name_of(node):
+    spelling = node.spelling.decode('utf-8')
+    if spelling:
+        return spelling
+
+    typedef_node = Cursor.from_location(node.translation_unit, node.extent.end)
+    if typedef_node.kind == CursorKind.TYPEDEF_DECL:
+        return name_of(typedef_node)
+    else:
+        return ''
 

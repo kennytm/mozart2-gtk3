@@ -151,7 +151,7 @@ def get_statement_creators(func_cursor, c_func_name):
         if arg.kind != CursorKind.PARM_DECL:
             continue
 
-        arg_name = arg.spelling.decode('utf-8')
+        arg_name = name_of(arg)
         yield decode_inout(arg_name, 'In', arg_name, arg.type.get_canonical())
 
 
