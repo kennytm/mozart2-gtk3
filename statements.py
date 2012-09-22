@@ -185,6 +185,11 @@ def get_cc_function_definition(func_cursor, c_func_name):
 
     cc_statements = []
 
+    try:
+        cc_statements.append(FUNCTION_SETUP[c_func_name])
+    except KeyError:
+        pass
+
     for creator in creators:
         creator.with_declaration = True
         cc_statements.append(creator.pre())
@@ -203,6 +208,11 @@ def get_cc_function_definition(func_cursor, c_func_name):
     arg_proto = ''.join(', ' + creator.oz_inout + ' ' + creator.oz_name
                         for creator in creators
                         if creator.oz_inout is not None and creator.oz_name != 'return')
+
+    try:
+        cc_statements.append(FUNCTION_TEARDOWN[c_func_name])
+    except KeyError:
+        pass
 
     return (arg_proto, cc_statements)
 
