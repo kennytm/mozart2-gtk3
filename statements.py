@@ -96,7 +96,10 @@ class NodeOutStatementsCreator(StatementsCreator):
     def post(self):
         return """
             auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(*(%(cc)s));
-            %(oz)s = UnstableNode(vm, *%(u)s->first);
+            if (%(u)s != nullptr)
+                %(oz)s = UnstableNode(vm, *%(u)s->first);
+            else
+                %(oz)s = build(vm, unit);
         """ % {'oz':self._oz_prefix, 'cc':self._cc_name, 'u':unique_str()}
 
 #-------------------------------------------------------------------------------
