@@ -165,6 +165,21 @@ class ListInStatementsCreator(InStatementsCreator):
             'len': len_name,
         }
 
+#-------------------------------------------------------------------------------
+# 'PointerIn' type
+
+class PointerInStatementsCreator(InStatementsCreator):
+    def pre(self):
+        return """
+            std::remove_cv<%(t)s>::type %(u)s;
+            unbuild(vm, %(oz)s, %(u)s);
+            %(cc)s = &%(u)s;
+        """ % {
+            't': to_cc(self._type.get_pointee()),
+            'u': unique_str(),
+            'cc': self._cc_prefix,
+            'oz': self._oz_name,
+        }
 
 #-------------------------------------------------------------------------------
 
