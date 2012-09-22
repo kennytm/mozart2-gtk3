@@ -88,11 +88,7 @@ class InStatementsCreator(StatementsCreator):
 #-------------------------------------------------------------------------------
 # 'NodeOut' type
 
-class NodeOutStatementsCreator(StatementsCreator):
-    @property
-    def oz_inout(self):
-        return 'Out'
-
+class NodeOutStatementsCreator(OutStatementsCreator):
     def post(self):
         return """
             auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(*(%(cc)s));
@@ -106,10 +102,6 @@ class NodeOutStatementsCreator(StatementsCreator):
 # 'NodeIn' type
 
 class NodeInStatementsCreator(InStatementsCreator):
-    @property
-    def oz_inout(self):
-        return 'In'
-
     def pre(self):
         return """
             %s = new std::pair<ProtectedNode, VM>(ozProtect(vm, %s), vm);
@@ -118,11 +110,7 @@ class NodeInStatementsCreator(InStatementsCreator):
 #-------------------------------------------------------------------------------
 # 'NodeDeleter' type
 
-class NodeDeleterStatementsCreator(InStatementsCreator):
-    @property
-    def oz_inout(self):
-        return None
-
+class NodeDeleterStatementsCreator(StatementsCreator):
     def pre(self):
         args = self._type.get_canonical().get_pointee().argument_types()
         lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i))
@@ -136,6 +124,15 @@ class NodeDeleterStatementsCreator(InStatementsCreator):
         """ % {'p':self._cc_prefix, 'l':lambda_args, 'u':unique_str(), 'n':self._context}
 
 #-------------------------------------------------------------------------------
+# 'AddressIn' type
+
+class AddressInStatementsCreator(InStatementsCreator):
+    def pre(self):
+        return """
+            %s = reinterpret_cast<%s>(IntegerValue(%s).intValue(vm));
+        """ % (self._cc_prefix, to_cc(self._type), self._oz_name)
+
+#-------------------------------------------------------------------------------
 
 def get_statement_creators(func_cursor, c_func_name):
     inouts = SPECIAL_INOUTS.get(c_func_name, {})
@@ -146,9 +143,8 @@ def get_statement_creators(func_cursor, c_func_name):
         try:
             inout_tuple = inouts[arg_name]
         except KeyError:
-            if typ.kind == TypeKind.TYPEDEF:
-                type_name = name_of(typ.get_declaration())
-                inout_tuple = SPECIAL_INOUTS_FOR_TYPES.get(type_name, default)
+            type_name = to_cc(typ)
+            inout_tuple = SPECIAL_INOUTS_FOR_TYPES.get(type_name, default)
 
         if isinstance(inout_tuple, str):
             inout = inout_tuple

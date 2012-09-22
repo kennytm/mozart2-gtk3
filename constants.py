@@ -19,6 +19,7 @@ FUNCTION_TEARDOWN = {
 
 SPECIAL_INOUTS_FOR_TYPES = {
     'cairo_destroy_func_t': ('NodeDeleter', 0),
+    'cairo_user_data_key_t const *': 'AddressIn',
 }
 
 SPECIAL_TYPES = {
