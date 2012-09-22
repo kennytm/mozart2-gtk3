@@ -133,6 +133,40 @@ class AddressInStatementsCreator(InStatementsCreator):
         """ % (self._cc_prefix, to_cc(self._type), self._oz_name)
 
 #-------------------------------------------------------------------------------
+# 'Skip' type
+
+class SkipStatementsCreator(StatementsCreator):
+    def pre(self):
+        return ""
+
+#-------------------------------------------------------------------------------
+# 'ListIn' type
+
+class ListInStatementsCreator(InStatementsCreator):
+    def pre(self):
+        len_name = 'x_cc_' + self._context
+        if self._with_declaration:
+            len_name = 'size_t ' + len_name
+
+        return """
+            std::vector<std::remove_cv<%(t)s>::type> %(u)s;
+            ozListForEach(vm, %(oz)s, [vm, &%(u)s](RichNode node) {
+                std::remove_cv<%(t)s>::type content;
+                unbuild(vm, node, content);
+                %(u)s.push_back(std::move(content));
+            }, MOZART_STR("%(t)s"));
+            %(cc)s = %(u)s.data();
+            %(len)s = %(u)s.size();
+        """ % {
+            'u': unique_str(),
+            't': to_cc(self._type.get_pointee()),
+            'oz': self._oz_name,
+            'cc': self._cc_prefix,
+            'len': len_name,
+        }
+
+
+#-------------------------------------------------------------------------------
 
 def get_statement_creators(func_cursor, c_func_name):
     inouts = SPECIAL_INOUTS.get(c_func_name, {})

@@ -8,6 +8,7 @@ BLACKLISTED = {
 SPECIAL_INOUTS = {
     'cairo_get_user_data': {'return': 'NodeOut'},
     'cairo_set_user_data': {'user_data': 'NodeIn'},
+    'cairo_set_dash': {'dashes': ('ListIn', 'num_dashes'), 'num_dashes': 'Skip'},
 }
 
 FUNCTION_SETUP = {}
