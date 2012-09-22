@@ -1,6 +1,7 @@
 from common import *
 from constants import *
 from itertools import product
+from collections import namedtuple
 
 def common_unbuild_functions():
     for int_type in ['char', 'signed char', 'unsigned char', 'short',
@@ -67,54 +68,55 @@ def common_unbuild_functions():
 
 def array_field_fixer(field_name, fields, struct_decl):
     if not field_name.startswith('num_'):
-        return None
+        return False
 
     array_field_name = field_name[4:]
     if array_field_name not in fields:
-        return None
+        return False
 
-    (num_field, _, _) = fields[field_name]
-    (array_field, array_atom_name, _) = fields[array_field_name]
+    num_field = fields[field_name].field
+    (array_field, array_atom_name, _, _) = fields[array_field_name]
 
     if array_field.type.kind != TypeKind.POINTER:
-        return None
+        return False
     if num_field.type.kind not in INTEGER_KINDS:
-        return None
+        return False
 
     new_builder = 'buildDynamicList(vm, cc.' + array_field_name + ', cc.' + field_name + ')'
 
     del fields[field_name]
-    fields[array_field_name] = (array_field, array_atom_name, new_builder)
+    fields[array_field_name] = FieldInfo(array_field, array_atom_name, new_builder, "")
 
-    return {'allow_unbuild': False}
+    return True
 
 FIXERS = [array_field_fixer]
 
 #-------------------------------------------------------------------------------
 
-def basic_field(field):
+FieldInfo = namedtuple('FieldInfo', ['field', 'atom', 'builder', 'unbuilder'])
+
+def create_field_info_pair(field):
     field_name = name_of(field)
-    return (field_name, (field,
-                         'MOZART_STR("' + camelize(field_name) + '")',
-                         'build(vm, cc.' + field_name + ')'))
+    atom = 'MOZART_STR("' + camelize(field_name) + '")'
+    builder = 'build(vm, cc.' + field_name + ')'
+    unbuilder = """
+    {
+        auto label = Atom::build(vm, %s);
+        auto field = Dottable(oz).dot(vm, label);
+        unbuild(vm, field, cc.%s);
+    }
+    """ % (atom, field_name)
+
+    return (field_name, FieldInfo(field, atom, builder, unbuilder))
 
 def fixup_fields(fields, struct_decl):
     modified = True
-    allow_unbuild = True
-
     while modified:
         modified = False
         for fixer, field_name in product(FIXERS, list(fields)):
-            fix_result = fixer(field_name, fields, struct_decl)
-            if fix_result is not None:
+            if fixer(field_name, fields, struct_decl):
                 modified = True
-                try:
-                    allow_unbuild = fix_result['allow_unbuild']
-                except KeyError:
-                    pass
                 break
-
-    return allow_unbuild
 
 def struct_builder(struct_decl):
     struct_name = name_of(struct_decl)
@@ -123,16 +125,13 @@ def struct_builder(struct_decl):
 
     if struct_decl.is_definition():
         field_names = map(name_of, struct_decl.get_children())
-        field_objects = dict(map(basic_field, struct_decl.get_children()))
+        field_objects = dict(map(create_field_info_pair, struct_decl.get_children()))
 
-        has_extractors = fixup_fields(field_objects, struct_decl)
+        fixup_fields(field_objects, struct_decl)
 
-        (_, field_names_iter, sub_builders_iter) = zip(*field_objects.values())
+        (_, atoms, builders, unbuilders) = zip(*field_objects.values())
 
-        field_names_concat = ', '.join(field_names_iter)
-        sub_builders_concat = ', '.join(sub_builders_iter)
-
-        cc_builder = """
+        return """
             static UnstableNode build(VM vm, const %(s)s& cc)
             {
                 return buildRecord(vm,
@@ -140,34 +139,18 @@ def struct_builder(struct_decl):
                     %(b)s
                 );
             }
+
+            static void unbuild(VM vm, RichNode oz, %(s)s& cc)
+            {
+                %(x)s
+            }
         """ % {
             'ss': strip_prefix_and_camelize(struct_name),
             's': struct_name,
-            'f': field_names_concat,
-            'b': sub_builders_concat
+            'f': ', '.join(atoms),
+            'b': ', '.join(builders),
+            'x': '\n'.join(unbuilders)
         }
-
-        if has_extractors:
-            extractors_concat = ''.join("""
-                {
-                    auto label = Atom::build(vm, MOZART_STR("%(f)s"));
-                    auto field = dottable.dot(vm, label);
-                    unbuild(vm, field, cc.%(f)s);
-                }
-            """ % {'f':f} for f in field_names)
-
-            cc_builder += """
-                static void unbuild(VM vm, RichNode oz, %(s)s& cc)
-                {
-                    Dottable dottable (oz);
-                    %(x)s
-                }
-            """ % {
-                's': struct_name,
-                'x': extractors_concat
-            }
-
-        return cc_builder
 
     else:
         return """
