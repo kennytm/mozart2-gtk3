@@ -21,15 +21,5 @@ SPECIAL_INOUTS_FOR_TYPES = {
 }
 
 SPECIAL_TYPES = {
-    '_cairo_rectangle_list': ("""
-            return buildRecord(vm,
-                buildArity(vm, MOZART_STR("rectangleList"), MOZART_STR("status"), MOZART_STR("rectangles")),
-                build(vm, cc.status), buildDynamicList(vm, cc.rectangles, cc.num_rectangles)
-            );
-        """, None)
 }
-
-#SPECIAL_TYPES = {
-#    'cairo_destroy_func_t':
-#}
 
