@@ -143,6 +143,7 @@ class Translator:
 
         self._cc_file.write("""
             #include <unordered_map>
+            #include <vector>
             #include "%(hh-file)s%(hh-ext)s"
             #include "%(mod)s%(types-decl-hh-ext)s"
 

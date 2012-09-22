@@ -1,3 +1,5 @@
+
+
 BLACKLISTED = {
     '__va_list_tag',
     'cairo_rectangle_list_destroy'  # we don't need to call this function at all.
@@ -11,9 +13,8 @@ SPECIAL_INOUTS = {
 FUNCTION_SETUP = {}
 
 FUNCTION_TEARDOWN = {
-    'cairo_copy_clip_rectangle_list': """
-        cairo_rectangle_list_destroy(*_x_cc__x_oz_return);
-    """
+    'cairo_copy_clip_rectangle_list': 'cairo_rectangle_list_destroy(*x_cc_x_oz_return);',
+    'cairo_copy_path': 'cairo_path_destroy(*x_cc_x_oz_return);',
 }
 
 SPECIAL_INOUTS_FOR_TYPES = {
@@ -21,5 +22,36 @@ SPECIAL_INOUTS_FOR_TYPES = {
 }
 
 SPECIAL_TYPES = {
+    'cairo_path_t': ("""
+        std::vector<UnstableNode> nodes;
+        int i = 0;
+        while (i < cc->num_data)
+        {
+            auto data = &cc->data[i];
+            switch (data->header.type)
+            {
+                case CAIRO_PATH_MOVE_TO:
+                    nodes.push_back(buildTuple(vm, MOZART_STR("moveTo"),
+                                               data[1].x, data[1].y));
+                    break;
+                case CAIRO_PATH_LINE_TO:
+                    nodes.push_back(buildTuple(vm, MOZART_STR("lineTo"),
+                                               data[1].x, data[1].y));
+                    break;
+                case CAIRO_PATH_CURVE_TO:
+                    nodes.push_back(buildTuple(vm, MOZART_STR("curveTo"),
+                                               data[1].x, data[1].y,
+                                               data[2].x, data[2].y,
+                                               data[3].x, data[3].y));
+                    break;
+                case CAIRO_PATH_CLOSE_PATH:
+                    nodes.push_back(build(vm, MOZART_STR("closePath")));
+                    break;
+            }
+            i += data->header.length;
+        }
+
+        return buildDynamicList(vm, nodes.data(), nodes.size());
+    """, None)
 }
 

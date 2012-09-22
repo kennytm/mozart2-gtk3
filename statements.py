@@ -69,7 +69,7 @@ class OutStatementsCreator(StatementsCreator):
         return 'Out'
 
     def post(self):
-        return self._oz_prefix + ' = build(vm, ' + self._cc_name + ');'
+        return self._oz_prefix + ' = build(vm, *' + self._cc_name + ');'
 
 #-------------------------------------------------------------------------------
 # "In" type.
@@ -170,7 +170,7 @@ def get_statement_creators(func_cursor, c_func_name):
 
     return_type = func_cursor.result_type.get_canonical()
     if return_type.kind != TypeKind.VOID:
-        yield decode_inout('return', 'Out', '_x_oz_return', PointerOf(return_type))
+        yield decode_inout('return', 'Out', 'x_oz_return', PointerOf(return_type))
 
 
 def get_cc_function_definition(func_cursor, c_func_name):
@@ -195,10 +195,10 @@ def get_cc_function_definition(func_cursor, c_func_name):
         cc_statements.append(creator.pre())
 
     call_args = (creator.cc_name for creator in creators
-                                 if creator.oz_name != '_x_oz_return')
+                                 if creator.oz_name != 'x_oz_return')
     call_statement = c_func_name + '(' + ', '.join(call_args) + ');'
     if func_cursor.result_type.get_canonical().kind != TypeKind.VOID:
-        call_statement = '*_x_cc__x_oz_return = ' + call_statement
+        call_statement = '*x_cc_x_oz_return = ' + call_statement
     cc_statements.append(call_statement)
 
     for creator in creators:

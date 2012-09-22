@@ -55,6 +55,12 @@ def common_unbuild_functions():
             }
             return list;
         }
+
+        template <typename T>
+        static typename std::enable_if<std::is_fundamental<T>::value, UnstableNode>::type build(VM vm, T value)
+        {
+            return ::mozart::build(vm, value);
+        }
     """
 
 #-------------------------------------------------------------------------------
@@ -130,7 +136,7 @@ def struct_builder(struct_decl):
             static UnstableNode build(VM vm, const %(s)s& cc)
             {
                 return buildRecord(vm,
-                    buildArity(vm, MOZART_STR("%(ss)s"), %(f)s,
+                    buildArity(vm, MOZART_STR("%(ss)s"), %(f)s),
                     %(b)s
                 );
             }
@@ -169,7 +175,7 @@ def struct_builder(struct_decl):
                 return D_%(s)s::build(vm, cc);
             }
 
-            static void build(VM vm, RichNode node, %(s)s*& cc) {
+            static void unbuild(VM vm, RichNode node, %(s)s*& cc) {
                 cc = node.as<D_%(s)s>().value();
             }
         """ % {'s': struct_name}
