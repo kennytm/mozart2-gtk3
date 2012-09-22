@@ -44,17 +44,13 @@ def common_unbuild_functions():
             return build(vm, *ptr);
         }
 
-        template <typename T>
-        static UnstableNode buildDynamicList(VM vm, T* array, size_t count)
+        template <typename It>
+        static UnstableNode buildDynamicList(VM vm, It begin, It end)
         {
-            UnstableNode list = buildNil(vm);
-            while (count > 0)
-            {
-                -- count;
-                auto head = build(vm, array[count]);
-                list = Cons::build(head, list);
-            }
-            return list;
+            OzListBuilder listBuilder (vm);
+            while (begin != end)
+                listBuilder.push_back(vm, *begin++);
+            return listBuilder.get(vm);
         }
 
         template <typename T>
@@ -82,7 +78,7 @@ def array_field_fixer(field_name, fields, struct_decl):
     if num_field.type.kind not in INTEGER_KINDS:
         return False
 
-    new_builder = 'buildDynamicList(vm, cc.' + array_field_name + ', cc.' + field_name + ')'
+    new_builder = 'buildDynamicList(vm, cc.%(a)s, cc.%(a)s + cc.%(n)s)' % {'a': array_field_name, 'n': field_name}
 
     del fields[field_name]
     fields[array_field_name] = FieldInfo(array_field, array_atom_name, new_builder, "")

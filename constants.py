@@ -24,7 +24,7 @@ SPECIAL_INOUTS_FOR_TYPES = {
 
 SPECIAL_TYPES = {
     'cairo_path_t': ("""
-        std::vector<UnstableNode> nodes;
+        OzListBuilder nodes (vm);
         int i = 0;
         while (i < cc->num_data)
         {
@@ -32,27 +32,27 @@ SPECIAL_TYPES = {
             switch (data->header.type)
             {
                 case CAIRO_PATH_MOVE_TO:
-                    nodes.push_back(buildTuple(vm, MOZART_STR("moveTo"),
-                                               data[1].x, data[1].y));
+                    nodes.push_back(vm, buildTuple(vm, MOZART_STR("moveTo"),
+                                                   data[1].x, data[1].y));
                     break;
                 case CAIRO_PATH_LINE_TO:
-                    nodes.push_back(buildTuple(vm, MOZART_STR("lineTo"),
-                                               data[1].x, data[1].y));
+                    nodes.push_back(vm, buildTuple(vm, MOZART_STR("lineTo"),
+                                                   data[1].x, data[1].y));
                     break;
                 case CAIRO_PATH_CURVE_TO:
-                    nodes.push_back(buildTuple(vm, MOZART_STR("curveTo"),
-                                               data[1].x, data[1].y,
-                                               data[2].x, data[2].y,
-                                               data[3].x, data[3].y));
+                    nodes.push_back(vm, buildTuple(vm, MOZART_STR("curveTo"),
+                                                   data[1].x, data[1].y,
+                                                   data[2].x, data[2].y,
+                                                   data[3].x, data[3].y));
                     break;
                 case CAIRO_PATH_CLOSE_PATH:
-                    nodes.push_back(build(vm, MOZART_STR("closePath")));
+                    nodes.push_back(vm, MOZART_STR("closePath"));
                     break;
             }
             i += data->header.length;
         }
 
-        return buildDynamicList(vm, nodes.data(), nodes.size());
+        return nodes.get(vm);
     """, None)
 }
 
