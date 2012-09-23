@@ -1,10 +1,16 @@
 from common import *
 from constants import *
+from fixers import *
 from itertools import product
-from collections import namedtuple
+from collections import OrderedDict
+from fake_type import PointerOf
+from to_cc import to_cc
+import creators
 
 def is_concrete(struct_decl):
     return struct_decl.is_definition() and name_of(struct_decl) not in OPAQUE_STRUCTS
+
+#-------------------------------------------------------------------------------
 
 def common_unbuild_functions():
     for int_type in ['char', 'signed char', 'unsigned char', 'short',
@@ -65,35 +71,6 @@ def common_unbuild_functions():
 
 #-------------------------------------------------------------------------------
 
-def array_field_fixer(field_name, fields, struct_decl):
-    if not field_name.startswith('num_'):
-        return False
-
-    array_field_name = field_name[4:]
-    if array_field_name not in fields:
-        return False
-
-    num_field = fields[field_name].field
-    (array_field, array_atom_name, _, _) = fields[array_field_name]
-
-    if array_field.type.kind != TypeKind.POINTER:
-        return False
-    if num_field.type.kind not in INTEGER_KINDS:
-        return False
-
-    new_builder = 'buildDynamicList(vm, cc.%(a)s, cc.%(a)s + cc.%(n)s)' % {'a': array_field_name, 'n': field_name}
-
-    del fields[field_name]
-    fields[array_field_name] = FieldInfo(array_field, array_atom_name, new_builder, "")
-
-    return True
-
-FIXERS = [array_field_fixer]
-
-#-------------------------------------------------------------------------------
-
-FieldInfo = namedtuple('FieldInfo', ['field', 'atom', 'builder', 'unbuilder'])
-
 def create_field_info_pair(field):
     field_name = name_of(field)
     atom = 'MOZART_STR("' + camelize(field_name) + '")'
@@ -108,22 +85,13 @@ def create_field_info_pair(field):
 
     return (field_name, FieldInfo(field, atom, builder, unbuilder))
 
-def fixup_fields(fields, struct_decl):
-    modified = True
-    while modified:
-        modified = False
-        for fixer, field_name in product(FIXERS, list(fields)):
-            if fixer(field_name, fields, struct_decl):
-                modified = True
-                break
-
 def struct_builder(struct_decl):
     struct_name = name_of(struct_decl)
     if is_concrete(struct_decl):
         field_names = map(name_of, struct_decl.get_children())
         field_objects = dict(map(create_field_info_pair, struct_decl.get_children()))
 
-        fixup_fields(field_objects, struct_decl)
+        fixup_fields(field_objects)
 
         (_, atoms, builders, unbuilders) = zip(*field_objects.values())
 
@@ -228,5 +196,98 @@ def builder(type_node):
             res.append("static void unbuild(VM vm, RichNode oz, %s& cc) { %s }" % (type_name, unbuild))
         return "\n".join(res)
 
-__all__ = ['builder', 'common_unbuild_functions', 'is_concrete']
+#-------------------------------------------------------------------------------
+
+def get_statement_creators(func_cursor, c_func_name):
+    for regex, special_inouts in SPECIAL_INOUTS:
+        if regex.match(c_func_name):
+            inouts = special_inouts
+            break
+    else:
+        inouts = {}
+
+    def decode_inout(arg_name, default, typ):
+        inout_tuple = default
+        try:
+            inout_tuple = inouts[arg_name]
+        except KeyError:
+            type_name = to_cc(typ)
+            inout_tuple = SPECIAL_INOUTS_FOR_TYPES.get(type_name, default)
+
+        if isinstance(inout_tuple, str):
+            inout = inout_tuple
+            context = None
+        else:
+            (inout, context) = inout_tuple
+
+        creator = getattr(creators, inout + 'StatementsCreator')()
+        creator._context = context
+        creator._name = arg_name
+        creator._type = typ
+        return creator
+
+    for arg in func_cursor.get_children():
+        if arg.kind != CursorKind.PARM_DECL:
+            continue
+
+        arg_name = name_of(arg)
+        yield decode_inout(arg_name, 'In', arg.type)
+
+
+    return_type = func_cursor.result_type.get_canonical()
+    if return_type.kind != TypeKind.VOID:
+        yield decode_inout('return', 'Out', PointerOf(return_type))
+
+
+def get_cc_function_definition(func_cursor, c_func_name):
+    """
+    Get the C++ function definition from a clang function Cursor. The result is
+    a 2-tuple, with the first being a C++ code of the signature of the Oz
+    built-in procedure (e.g. ``, In arg1, Out arg2``), and the second being a
+    list of C++ statements of the built-in procedure.
+    """
+
+    pre_fixup_creators = get_statement_creators(func_cursor, c_func_name)
+    pre_fixup_creators_dict = OrderedDict((c._name, c) for c in pre_fixup_creators)
+    fixup_args(pre_fixup_creators_dict)
+    creators = list(pre_fixup_creators_dict.values())
+
+    cc_statements = []
+
+    try:
+        cc_statements.append(FUNCTION_SETUP[c_func_name])
+    except KeyError:
+        pass
+
+    for creator in creators:
+        creator._with_declaration = True
+        cc_statements.append(creator.pre())
+
+    call_args = (creator.cc_name for creator in creators if creator._name != 'return')
+    call_statement = c_func_name + '(' + ', '.join(call_args) + ');'
+    if func_cursor.result_type.get_canonical().kind != TypeKind.VOID:
+        call_statement = '*' + CC_NAME_OF_RETURN + ' = ' + call_statement
+    cc_statements.append(call_statement)
+
+    for creator in creators:
+        creator._with_declaration = False
+        cc_statements.append(creator.post())
+
+    arg_proto = []
+    for creator in creators:
+        inout = creator.get_oz_inout()
+        if inout in {'In', 'InOut'}:
+            arg_proto.append(', In ' + creator.oz_in_name)
+        if inout in {'Out', 'InOut'}:
+            arg_proto.append(', Out ' + creator.oz_out_name)
+
+    try:
+        cc_statements.append(FUNCTION_TEARDOWN[c_func_name])
+    except KeyError:
+        pass
+
+    return (''.join(arg_proto), cc_statements)
+
+__all__ = ['builder', 'common_unbuild_functions', 'is_concrete',
+           'get_cc_function_definition', 'FieldInfo']
 

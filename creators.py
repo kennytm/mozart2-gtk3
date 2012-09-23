@@ -1,8 +1,6 @@
-from constants import *
-from common import *
-from fake_type import PointerOf, IntType
+from common import cc_name_of, oz_in_name_of, oz_out_name_of, unique_str
+from fake_type import IntType
 from to_cc import to_cc
-from itertools import chain
 
 class StatementsCreator:
     def _make_prefix(self, name):
@@ -208,97 +206,4 @@ class PointerInStatementsCreator(InStatementsCreator):
             'oz': self.oz_in_name,
         }
 
-#-------------------------------------------------------------------------------
-
-def get_statement_creators(func_cursor, c_func_name):
-    for regex, special_inouts in SPECIAL_INOUTS:
-        if regex.match(c_func_name):
-            inouts = special_inouts
-            break
-    else:
-        inouts = {}
-
-    globals_dict = globals()
-
-    def decode_inout(arg_name, default, typ):
-        inout_tuple = default
-        try:
-            inout_tuple = inouts[arg_name]
-        except KeyError:
-            type_name = to_cc(typ)
-            inout_tuple = SPECIAL_INOUTS_FOR_TYPES.get(type_name, default)
-
-        if isinstance(inout_tuple, str):
-            inout = inout_tuple
-            context = None
-        else:
-            (inout, context) = inout_tuple
-
-        creator = globals_dict[inout + 'StatementsCreator']()
-        creator._context = context
-        creator._name = arg_name
-        creator._type = typ
-        return creator
-
-    for arg in func_cursor.get_children():
-        if arg.kind != CursorKind.PARM_DECL:
-            continue
-
-        arg_name = name_of(arg)
-        yield decode_inout(arg_name, 'In', arg.type)
-
-
-    return_type = func_cursor.result_type.get_canonical()
-    if return_type.kind != TypeKind.VOID:
-        yield decode_inout('return', 'Out', PointerOf(return_type))
-
-
-def get_cc_function_definition(func_cursor, c_func_name):
-    """
-    Get the C++ function definition from a clang function Cursor. The result is
-    a 2-tuple, with the first being a C++ code of the signature of the Oz
-    built-in procedure (e.g. ``, In arg1, Out arg2``), and the second being a
-    list of C++ statements of the built-in procedure.
-    """
-
-    creators = list(get_statement_creators(func_cursor, c_func_name))
-
-    cc_statements = []
-
-    try:
-        cc_statements.append(FUNCTION_SETUP[c_func_name])
-    except KeyError:
-        pass
-
-    for creator in creators:
-        creator._with_declaration = True
-        cc_statements.append(creator.pre())
-
-    call_args = (creator.cc_name for creator in creators if creator._name != 'return')
-    call_statement = c_func_name + '(' + ', '.join(call_args) + ');'
-    if func_cursor.result_type.get_canonical().kind != TypeKind.VOID:
-        call_statement = '*' + CC_NAME_OF_RETURN + ' = ' + call_statement
-    cc_statements.append(call_statement)
-
-    for creator in creators:
-        creator._with_declaration = False
-        cc_statements.append(creator.post())
-
-    arg_proto = []
-    for creator in creators:
-        inout = creator.get_oz_inout()
-        if inout in {'In', 'InOut'}:
-            arg_proto.append(', In ' + creator.oz_in_name)
-        if inout in {'Out', 'InOut'}:
-            arg_proto.append(', Out ' + creator.oz_out_name)
-
-    try:
-        cc_statements.append(FUNCTION_TEARDOWN[c_func_name])
-    except KeyError:
-        pass
-
-    return (''.join(arg_proto), cc_statements)
-
-__all__ = ['get_cc_function_definition', 'CC_NAME_OF_RETURN',
-           'cc_name_of', 'oz_in_name_of', 'oz_out_name_of']
 

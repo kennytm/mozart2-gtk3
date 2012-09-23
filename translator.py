@@ -6,7 +6,6 @@ import re
 from os.path import join
 from clang.cindex import TranslationUnit, Config, CursorKind
 from constants import *
-from statements import *
 from builders import *
 from common import *
 
