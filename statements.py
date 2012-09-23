@@ -159,6 +159,13 @@ class SkipStatementsCreator(StatementsCreator):
         return ""
 
 #-------------------------------------------------------------------------------
+# 'Constant' type
+
+class ConstantStatementsCreator(StatementsCreator):
+    def pre(self):
+        return "%s = %s;" % (self.cc_prefix, self._context)
+
+#-------------------------------------------------------------------------------
 # 'ListIn' type
 
 class ListInStatementsCreator(InStatementsCreator):

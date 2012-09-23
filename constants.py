@@ -10,9 +10,9 @@ BLACKLISTED = [re.compile(p) for p in [
 ]]
 
 SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
-    'cairo_get_user_data$':
+    'cairo_(?:font_face_|scaled_font_)?get_user_data$':
         {'return': 'NodeOut'},
-    'cairo_set_user_data$':
+    'cairo_(?:font_face_|scaled_font_)?set_user_data$':
         {'user_data': 'NodeIn'},
     'cairo_set_dash$':
         {'dashes': ('ListIn', 'num_dashes'), 'num_dashes': 'Skip'},
@@ -22,6 +22,19 @@ SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
         {'dx': 'InOut', 'dy': 'InOut'},
     'cairo_(?:path|stroke|fill|clip)_extents$':
         {'x1': 'Out', 'x2': 'Out', 'y1': 'Out', 'y2': 'Out'},
+    'cairo_get_font_matrix$':
+        {'matrix': 'Out'},
+    'cairo_scaled_font_get_(?:ctm|(?:font|scale)_matrix)$':
+        {'ctm': 'Out', 'scale_matrix': 'Out', 'font_matrix': 'Out'},
+    'cairo_get_current_point$':
+        {'x': 'Out', 'y': 'Out'},
+    'cairo_(?:show_(?:text_)?glyphs|glyph_path)$':
+        {'glyphs': ('ListIn', 'num_glyphs'), 'num_glyphs': 'Skip',
+         'clusters': ('ListIn', 'num_clusters'), 'num_clusters': 'Skip',
+         'utf8_len': ('Constant', '-1')},
+    'cairo_(?:(?:scaled_font_)?(?:text|glyph)|(?:scaled_)?font)_extents$':
+        {'extents': 'Out',
+         'num_glyphs': 'Skip', 'glyphs': ('ListIn', 'num_glyphs')},
 }.items()]
 
 FUNCTION_SETUP = {}
