@@ -49,7 +49,7 @@ class StatementsCreator:
     def pre(self):
         cc_complete_name = unique_str()
         cc_decl = to_cc(self._type.get_pointee(), cc_complete_name)
-        return "%s; %s = &%s;" % (cc_decl, self.cc_prefix, cc_complete_name)
+        return "%s {}; %s = &%s;" % (cc_decl, self.cc_prefix, cc_complete_name)
 
     def post(self):
         return ""
@@ -208,7 +208,7 @@ class ListOutStatementsCreator(OutStatementsCreator):
 
     def pre(self):
         return super().pre() + """
-            int %(u)s;
+            int %(u)s = 0;
             auto %(cc)s = &%(u)s;
         """ % {
             'cc': cc_name_of(self._context),
