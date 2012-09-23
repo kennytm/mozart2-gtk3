@@ -208,7 +208,7 @@ class Translator:
 
         self._cc_file.write(builder(type_node))
 
-        if type_node.kind == CursorKind.STRUCT_DECL and not type_node.is_definition():
+        if type_node.kind == CursorKind.STRUCT_DECL and not is_concrete(type_node):
             (decl_hh, hh) = create_datatype(name_of(type_node))
             self._types_decl_hh_file.writelines(decl_hh)
             self._types_hh_file.write(hh)

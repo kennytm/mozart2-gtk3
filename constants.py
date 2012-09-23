@@ -73,3 +73,5 @@ SPECIAL_TYPES = {
     """, None)
 }
 
+OPAQUE_STRUCTS = set()
+

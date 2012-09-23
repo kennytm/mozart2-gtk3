@@ -3,6 +3,9 @@ from constants import *
 from itertools import product
 from collections import namedtuple
 
+def is_concrete(struct_decl):
+    return struct_decl.is_definition() and name_of(struct_decl) not in OPAQUE_STRUCTS
+
 def common_unbuild_functions():
     for int_type in ['char', 'signed char', 'unsigned char', 'short',
                      'unsigned short', 'int', 'unsigned', 'long',
@@ -116,7 +119,7 @@ def fixup_fields(fields, struct_decl):
 
 def struct_builder(struct_decl):
     struct_name = name_of(struct_decl)
-    if struct_decl.is_definition():
+    if is_concrete(struct_decl):
         field_names = map(name_of, struct_decl.get_children())
         field_objects = dict(map(create_field_info_pair, struct_decl.get_children()))
 
@@ -152,6 +155,10 @@ def struct_builder(struct_decl):
             }
 
             static void unbuild(VM vm, RichNode node, %(s)s*& cc) {
+                cc = node.as<D_%(s)s>().value();
+            }
+
+            static void unbuild(VM vm, RichNode node, const %(s)s*& cc) {
                 cc = node.as<D_%(s)s>().value();
             }
         """ % {'s': struct_name}
@@ -221,4 +228,5 @@ def builder(type_node):
             res.append("static void unbuild(VM vm, RichNode oz, %s& cc) { %s }" % (type_name, unbuild))
         return "\n".join(res)
 
+__all__ = ['builder', 'common_unbuild_functions', 'is_concrete']
 
