@@ -233,12 +233,12 @@ class Translator:
                 struct P_%(target)s : Builtin<P_%(target)s>
                 {
                     P_%(target)s() : Builtin("%(target)s") {}
-                    void operator()(VM vm%(args)s) const;
+                    void operator()(VM vm%(args)s);
                 };
         """ % params)
 
         self._cc_file.write("""
-            void M_%(mod)s::P_%(target)s::operator()(VM vm%(args)s) const
+            void M_%(mod)s::P_%(target)s::operator()(VM vm%(args)s)
             {
         """ % params)
         for statement in cc_statements:
