@@ -44,12 +44,6 @@ def common_unbuild_functions():
             cc = lstring.string;
         }
 
-        template <typename T>
-        static typename std::enable_if<!std::is_fundamental<T>::value, UnstableNode>::type build(VM vm, T* ptr)
-        {
-            return build(vm, *ptr);
-        }
-
         template <typename It>
         static UnstableNode buildDynamicList(VM vm, It begin, It end)
         {
@@ -60,9 +54,27 @@ def common_unbuild_functions():
         }
 
         template <typename T>
-        static typename std::enable_if<std::is_fundamental<T>::value, UnstableNode>::type build(VM vm, T value)
+        static auto build(VM vm, T value)
+            -> typename std::enable_if<(std::is_integral<T>::value && std::is_signed<T>::value &&
+                                        sizeof(T) <= sizeof(nativeint)), UnstableNode>::type
         {
-            return ::mozart::build(vm, value);
+            nativeint extended = value;
+            return ::mozart::build(vm, extended);
+        }
+
+        template <typename T>
+        static auto build(VM vm, T value)
+            -> typename std::enable_if<(std::is_integral<T>::value && std::is_unsigned<T>::value &&
+                                        sizeof(T) <= sizeof(size_t)), UnstableNode>::type
+        {
+            size_t extended = value;
+            return ::mozart::build(vm, extended);
+        }
+
+        template <typename T>
+        static typename std::enable_if<!std::is_fundamental<T>::value, UnstableNode>::type build(VM vm, T* ptr)
+        {
+            return build(vm, *ptr);
         }
 
         static void* wrapNode(VM vm, RichNode node)
