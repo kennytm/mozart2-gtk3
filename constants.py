@@ -1,5 +1,5 @@
 import re
-from common import CC_NAME_OF_RETURN
+from common import CC_NAME_OF_RETURN, cc_name_of
 
 BLACKLISTED = [re.compile(p) for p in [
     '__va_list_tag$',
@@ -43,6 +43,10 @@ FUNCTION_TEARDOWN = {
         'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
     'cairo_copy_path_flat':
         'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
+    'cairo_scaled_font_text_to_glyphs': """
+        cairo_text_cluster_free(*%s);
+        cairo_glyph_free(*%s);
+    """ % (cc_name_of('clusters'), cc_name_of('glyphs')),
 }
 
 SPECIAL_INOUTS_FOR_TYPES = {
