@@ -79,6 +79,9 @@ def create_datatype(struct_name):
         }
     """ % params)
 
+def is_blacklisted(name):
+    return any(regex.match(name) for regex in BLACKLISTED)
+
 #-------------------------------------------------------------------------------
 
 class Translator:
@@ -200,10 +203,12 @@ class Translator:
         """
         Print a single type.
         """
+        if is_blacklisted(name_of(type_node)):
+            return
+
         self._cc_file.write(builder(type_node))
 
-        if type_node.kind == CursorKind.STRUCT_DECL and not type_node.is_definition() \
-                and name_of(type_node) not in BLACKLISTED:
+        if type_node.kind == CursorKind.STRUCT_DECL and not type_node.is_definition():
             (decl_hh, hh) = create_datatype(name_of(type_node))
             self._types_decl_hh_file.writelines(decl_hh)
             self._types_hh_file.write(hh)
@@ -255,7 +260,7 @@ class Translator:
         for node in tu.cursor.get_children():
             kind = node.kind
             if kind == CursorKind.FUNCTION_DECL:
-                if name_of(node) not in BLACKLISTED:
+                if not is_blacklisted(name_of(node)):
                     functions.append(node)
             elif kind in {CursorKind.STRUCT_DECL, CursorKind.ENUM_DECL}:
                 types.append(node)

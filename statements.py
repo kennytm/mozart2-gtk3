@@ -204,7 +204,13 @@ class PointerInStatementsCreator(InStatementsCreator):
 #-------------------------------------------------------------------------------
 
 def get_statement_creators(func_cursor, c_func_name):
-    inouts = SPECIAL_INOUTS.get(c_func_name, {})
+    for regex, special_inouts in SPECIAL_INOUTS:
+        if regex.match(c_func_name):
+            inouts = special_inouts
+            break
+    else:
+        inouts = {}
+
     globals_dict = globals()
 
     def decode_inout(arg_name, default, typ):

@@ -116,9 +116,6 @@ def fixup_fields(fields, struct_decl):
 
 def struct_builder(struct_decl):
     struct_name = name_of(struct_decl)
-    if struct_name in BLACKLISTED:
-        return ""
-
     if struct_decl.is_definition():
         field_names = map(name_of, struct_decl.get_children())
         field_objects = dict(map(create_field_info_pair, struct_decl.get_children()))

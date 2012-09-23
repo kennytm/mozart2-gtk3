@@ -1,28 +1,36 @@
 import re
 from common import CC_NAME_OF_RETURN
 
-BLACKLISTED = {
-    '__va_list_tag',
-    'cairo_rectangle_list_destroy',  # we don't need to call these functions at all.
-    'cairo_path_destroy'
-}
+BLACKLISTED = [re.compile(p) for p in [
+    '__va_list_tag$',
+    'cairo_(?:rectangle_list|path)_destroy$',
+    # ^ we don't need to call these functions at all.
+    'cairo_(?:glyph|text_cluster)_(?:allocate|free)$',
+    # ^ we will allocate them on behalf of the users.
+]]
 
-SPECIAL_INOUTS = {
-    'cairo_get_user_data': {'return': 'NodeOut'},
-    'cairo_set_user_data': {'user_data': 'NodeIn'},
-    'cairo_set_dash': {'dashes': ('ListIn', 'num_dashes'), 'num_dashes': 'Skip'},
-    'cairo_user_to_device': {'x': 'InOut', 'y': 'InOut'},
-    'cairo_user_to_device_distance': {'dx': 'InOut', 'dy': 'InOut'},
-    'cairo_device_to_user': {'x': 'InOut', 'y': 'InOut'},
-    'cairo_device_to_user_distance': {'dx': 'InOut', 'dy': 'InOut'},
-    'cairo_path_extents': {'x1': 'Out', 'x2': 'Out', 'y1': 'Out', 'y2': 'Out'},
-}
+SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
+    'cairo_get_user_data$':
+        {'return': 'NodeOut'},
+    'cairo_set_user_data$':
+        {'user_data': 'NodeIn'},
+    'cairo_set_dash$':
+        {'dashes': ('ListIn', 'num_dashes'), 'num_dashes': 'Skip'},
+    'cairo_(?:user_to_device|device_to_user)$':
+        {'x': 'InOut', 'y': 'InOut'},
+    'cairo_(?:user_to_device|device_to_user)_distance$':
+        {'dx': 'InOut', 'dy': 'InOut'},
+    'cairo_(?:path|stroke|fill|clip)_extents$':
+        {'x1': 'Out', 'x2': 'Out', 'y1': 'Out', 'y2': 'Out'},
+}.items()]
 
 FUNCTION_SETUP = {}
 
 FUNCTION_TEARDOWN = {
-    'cairo_copy_clip_rectangle_list': 'cairo_rectangle_list_destroy(*' + CC_NAME_OF_RETURN + ');',
-    'cairo_copy_path': 'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
+    'cairo_copy_clip_rectangle_list':
+        'cairo_rectangle_list_destroy(*' + CC_NAME_OF_RETURN + ');',
+    'cairo_copy_path':
+        'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
 }
 
 SPECIAL_INOUTS_FOR_TYPES = {

@@ -126,5 +126,3 @@ def oz_out_name_of(name):
 
 CC_NAME_OF_RETURN = cc_name_of('return')
 
-
-
