@@ -164,11 +164,6 @@ class ConstantStatementsCreator(StatementsCreator):
 
 class ListInStatementsCreator(InStatementsCreator):
     def pre(self):
-        list_length_creator = SkipStatementsCreator()
-        list_length_creator._type = IntType()
-        list_length_creator._name = self._context
-        list_length_creator._with_declaration = True
-
         return """
             std::vector<std::remove_cv<%(t)s>::type> %(u)s;
             ozListForEach(vm, %(oz)s, [vm, &%(u)s](RichNode node) {
@@ -177,13 +172,13 @@ class ListInStatementsCreator(InStatementsCreator):
                 %(u)s.push_back(std::move(content));
             }, MOZART_STR("%(t)s"));
             %(cc)s = %(u)s.data();
-            %(len)s = %(u)s.size();
+            auto %(len)s = %(u)s.size();
         """ % {
             'u': unique_str(),
             't': to_cc(self._type.get_pointee()),
             'oz': self.oz_in_name,
             'cc': self.cc_prefix,
-            'len': list_length_creator.cc_prefix,
+            'len': cc_name_of(self._context),
         }
 
 #-------------------------------------------------------------------------------

@@ -8,32 +8,64 @@ BLACKLISTED = [re.compile(p) for p in [
     'cairo_(?:glyph|text_cluster)_(?:allocate|free)$',
     # ^ we will destroy them on behalf of the users.
     'cairo_user_(?:scaled_font|font_face)',
-    # ^ TODO: restore these functions.
+    'cairo_surface_observer_add_',
+    'cairo_(?:surface|device)_observer_print$',
+    'cairo_surface_write_to_png_stream$',
+    'cairo_raster_source_pattern_[gs]et_(?:acquire|snapshot|copy|finish)$',
+    # ^ TODO: restore these functions (need callback support).
+    'cairo_surface_[gs]et_mime_data$',
+    'cairo_pattern_create_raster_source$',
+    'cairo_raster_source_pattern_[gs]et_callback_data$',
+    # ^ TODO: restore these functions (need bytestring support).
+    'cairo_image_surface_create_(?:for_data|from_png_stream)$',
+    # ^ TODO: needs to protect the data with this function!
 ]]
 
 SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
-    'cairo_(?:font_face_|scaled_font_)?get_user_data$':
+    'cairo_(?:font_face_|scaled_font_|device_|surface_|pattern_)?get_user_data$':
         {'return': 'NodeOut'},
-    'cairo_(?:font_face_|scaled_font_)?set_user_data$':
+    'cairo_(?:font_face_|scaled_font_|device_|surface_|pattern_)?set_user_data$':
         {'user_data': 'NodeIn'},
-    'cairo_(?:user_to_device|device_to_user)$':
+    'cairo_(?:user_to_device|device_to_user|matrix_transform_point)$':
         {'x': 'InOut', 'y': 'InOut'},
-    'cairo_(?:user_to_device|device_to_user)_distance$':
+    'cairo_(?:user_to_device|device_to_user|matrix_transform)_distance$':
         {'dx': 'InOut', 'dy': 'InOut'},
     'cairo_(?:path|stroke|fill|clip)_extents$':
         {'x1': 'Out', 'x2': 'Out', 'y1': 'Out', 'y2': 'Out'},
-    'cairo_get_(?:font_)?matrix$':
+    'cairo_(?:(?:get|pattern_get|get_font)_matrix|matrix_init(?:_identity|_translate|_scale|_rotate)?)$':
         {'matrix': 'Out'},
+    'cairo_matrix_(?:translate|scale|rotate|invert)$':
+        {'matrix': 'InOut'},
+    'cairo_matrix_multiply$':
+        {'result': 'Out'},
     'cairo_scaled_font_get_(?:ctm|(?:font|scale)_matrix)$':
         {'ctm': 'Out', 'scale_matrix': 'Out', 'font_matrix': 'Out'},
-    'cairo_get_current_point$':
+    'cairo_(?:get_current|mesh_pattern_get_control)_point$':
         {'x': 'Out', 'y': 'Out'},
     'cairo_(?:show_(?:text_)?glyphs|glyph_path)$':
         {'utf8_len': ('Constant', '-1')},
-    'cairo_(?:(?:scaled_font_)?(?:text|glyph)|(?:scaled_)?font)_extents$':
+    'cairo_(?:(?:scaled_font_)?(?:text|glyph)|(?:scaled_)?font|re(?:gion|cording_surface)_get)_extents$':
         {'extents': 'Out'},
-    'cairo_scaled_font_text_to_glyphs':
+    'cairo_scaled_font_text_to_glyphs$':
         {'cluster_flags': 'Out', 'utf8_len': ('Constant', '-1')},
+    'cairo_surface_get_device_offset$':
+        {'x_offset': 'Out', 'y_offset': 'Out'},
+    'cairo_surface_get_fallback_resolution$':
+        {'x_pixels_per_inch': 'Out', 'y_pixels_per_inch': 'Out'},
+    'cairo_(?:mesh_pattern_get_corner_color|pattern_get(?:_color_stop)?)_rgba$':
+        {'red': 'Out', 'green': 'Out', 'blue': 'Out', 'alpha': 'Out',
+         'offset': 'Out'},
+    'cairo_pattern_get_surface$':
+        {'surface': 'Out'},
+    'cairo_(?:mesh_pattern_get_patch|pattern_get_color_stop)_count$':
+        {'count': 'Out'},
+    'cairo_pattern_get_(?:linear_points|radial_circles)$':
+        {'x0': 'Out', 'y0': 'Out', 'x1': 'Out', 'y1': 'Out',
+         'r0': 'Out', 'r1': 'Out'},
+    'cairo_recording_surface_ink_extents$':
+        {'x0': 'Out', 'y0': 'Out', 'width': 'Out', 'height': 'Out'},
+    'cairo_region_get_rectangle$':
+        {'rectangle': 'Out'},
 }.items()]
 
 FUNCTION_PRE_SETUP = {}
@@ -159,7 +191,17 @@ SPECIAL_FUNCTIONS = {
             cairo_get_dash(cc_cr, cc_dashes.get(), &cc_offset);
             dashes = buildDynamicList(vm, cc_dashes.get(), cc_dashes.get() + cc_num_dashes);
             offset = build(vm, cc_offset);
-        """])
+        """]),
+    'cairo_image_surface_get_data':
+        (', In surface, Out data', ["""
+            cairo_surface_t* cc_surface;
+            unbuild(vm, surface, cc_surface);
+            int height = cairo_image_surface_get_height(cc_surface);
+            int stride = cairo_image_surface_get_stride(cc_surface);
+            int length = height * stride;
+            auto cc_data = cairo_image_surface_get_data(cc_surface);
+            data = ByteString::build(vm, newLString(vm, cc_data, length));
+        """]),
 }
 
 OPAQUE_STRUCTS = set()
