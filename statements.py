@@ -1,61 +1,53 @@
 from constants import *
 from common import *
-from fake_type import PointerOf
+from fake_type import PointerOf, IntType
 from to_cc import to_cc
 from itertools import chain
 
 class StatementsCreator:
+    def _make_prefix(self, name):
+        return 'auto ' + name if self._with_declaration else name
+
     @property
     def cc_name(self):
-        return self._cc_name
-
-    @cc_name.setter
-    def cc_name(self, name):
-        self._cc_name = name
-        self._cc_prefix = 'auto ' + name if self._with_declaration else name
+        return cc_name_of(self._name)
 
     @property
-    def oz_name(self):
-        return self._oz_name
-
-    @oz_name.setter
-    def oz_name(self, name):
-        self._oz_name = name
-        self._oz_prefix = 'auto ' + name if self._with_declaration else name
+    def cc_prefix(self):
+        return self._make_prefix(self.cc_name)
 
     @property
-    def with_declaration(self):
-        return self._with_declaration
+    def oz_in_name(self):
+        return oz_in_name_of(self._name)
 
-    @with_declaration.setter
-    def with_declaration(self, with_decl):
-        self._with_declaration = with_decl
-        if not with_decl:
-            self._oz_prefix = self._oz_name
-            self._cc_prefix = self._cc_name
-        else:
-            self._oz_prefix = 'auto ' + self._oz_name
-            self._cc_prefix = 'auto ' + self._cc_name
+    @property
+    def oz_in_prefix(self):
+        return self._make_prefix(self.oz_in_name)
+
+    @property
+    def oz_out_name(self):
+        return oz_out_name_of(self._name)
+
+    @property
+    def oz_out_prefix(self):
+        return self._make_prefix(self.oz_out_name)
 
     def __copy__(self):
         new_copy = type(self)()
         new_copy._type = self._type
-        new_copy._cc_name = self._cc_name
-        new_copy._oz_name = self._oz_name
+        new_copy._name = self._name
         new_copy._with_declaration = self._with_declaration
         new_copy._context = self._context
-        new_copy._cc_prefix = self._cc_prefix
-        new_copy._oz_prefix = self._oz_prefix
         return new_copy
 
-    @property
-    def oz_inout(self):
+    @staticmethod
+    def get_oz_inout():
         return None
 
     def pre(self):
         cc_complete_name = unique_str()
         cc_decl = to_cc(self._type.get_pointee(), cc_complete_name)
-        return "%s; %s = &%s;" % (cc_decl, self._cc_prefix, cc_complete_name)
+        return "%s; %s = &%s;" % (cc_decl, self.cc_prefix, cc_complete_name)
 
     def post(self):
         return ""
@@ -64,26 +56,53 @@ class StatementsCreator:
 # "Out" type.
 
 class OutStatementsCreator(StatementsCreator):
-    @property
-    def oz_inout(self):
+    @staticmethod
+    def get_oz_inout():
         return 'Out'
 
     def post(self):
-        return self._oz_prefix + ' = build(vm, *' + self._cc_name + ');'
+        return self.oz_out_prefix + ' = build(vm, *' + self.cc_name + ');'
 
 #-------------------------------------------------------------------------------
 # "In" type.
 
 class InStatementsCreator(StatementsCreator):
-    @property
-    def oz_inout(self):
+    @staticmethod
+    def get_oz_inout():
         return 'In'
 
     def pre(self):
-        expr = 'unbuild(vm, ' + self._oz_name + ', ' + self._cc_name + ');'
+        expr = 'unbuild(vm, ' + self.oz_in_name + ', ' + self.cc_name + ');'
         if self._with_declaration:
-            expr = to_cc(self._type, self._cc_name) + ';\n' + expr
+            expr = to_cc(self._type, self.cc_name) + ';\n' + expr
         return expr
+
+#-------------------------------------------------------------------------------
+# "InOut" type.
+
+class InOutStatementsCreator(OutStatementsCreator):
+    @staticmethod
+    def get_oz_inout():
+        return 'InOut'
+
+    def pre(self):
+        in_creator = InStatementsCreator()
+        in_creator._type = self._type.get_pointee()
+        in_creator._name = unique_str()
+        in_creator._with_declaration = True
+        in_creator._context = self._context
+
+        return """
+            auto& %(uoz)s = %(oz)s;
+            %(pre)s
+            %(cc)s = &%(ucc)s;
+        """ % {
+            'pre': in_creator.pre(),
+            'cc': self.cc_prefix,
+            'ucc': in_creator.cc_name,
+            'uoz': in_creator.oz_in_name,
+            'oz': self.oz_in_name,
+        }
 
 #-------------------------------------------------------------------------------
 # 'NodeOut' type
@@ -96,7 +115,7 @@ class NodeOutStatementsCreator(OutStatementsCreator):
                 %(oz)s = UnstableNode(vm, *%(u)s->first);
             else
                 %(oz)s = build(vm, unit);
-        """ % {'oz':self._oz_prefix, 'cc':self._cc_name, 'u':unique_str()}
+        """ % {'oz':self.oz_out_prefix, 'cc':self.cc_name, 'u':unique_str()}
 
 #-------------------------------------------------------------------------------
 # 'NodeIn' type
@@ -105,7 +124,7 @@ class NodeInStatementsCreator(InStatementsCreator):
     def pre(self):
         return """
             %s = new std::pair<ProtectedNode, VM>(ozProtect(vm, %s), vm);
-        """ % (self._cc_prefix, self._oz_name)
+        """ % (self.cc_prefix, self.oz_in_name)
 
 #-------------------------------------------------------------------------------
 # 'NodeDeleter' type
@@ -121,7 +140,7 @@ class NodeDeleterStatementsCreator(StatementsCreator):
                 ozUnprotect(%(u)s->second, %(u)s->first);
                 delete %(u)s;
             };
-        """ % {'p':self._cc_prefix, 'l':lambda_args, 'u':unique_str(), 'n':self._context}
+        """ % {'p':self.cc_prefix, 'l':lambda_args, 'u':unique_str(), 'n':self._context}
 
 #-------------------------------------------------------------------------------
 # 'AddressIn' type
@@ -130,7 +149,7 @@ class AddressInStatementsCreator(InStatementsCreator):
     def pre(self):
         return """
             %s = reinterpret_cast<%s>(IntegerValue(%s).intValue(vm));
-        """ % (self._cc_prefix, to_cc(self._type), self._oz_name)
+        """ % (self.cc_prefix, to_cc(self._type), self.oz_in_name)
 
 #-------------------------------------------------------------------------------
 # 'Skip' type
@@ -144,9 +163,10 @@ class SkipStatementsCreator(StatementsCreator):
 
 class ListInStatementsCreator(InStatementsCreator):
     def pre(self):
-        len_name = 'x_cc_' + self._context
-        if self._with_declaration:
-            len_name = 'size_t ' + len_name
+        list_length_creator = SkipStatementsCreator()
+        list_length_creator._type = IntType()
+        list_length_creator._name = self._context
+        list_length_creator._with_declaration = True
 
         return """
             std::vector<std::remove_cv<%(t)s>::type> %(u)s;
@@ -160,9 +180,9 @@ class ListInStatementsCreator(InStatementsCreator):
         """ % {
             'u': unique_str(),
             't': to_cc(self._type.get_pointee()),
-            'oz': self._oz_name,
-            'cc': self._cc_prefix,
-            'len': len_name,
+            'oz': self.oz_in_name,
+            'cc': self.cc_prefix,
+            'len': list_length_creator.cc_prefix,
         }
 
 #-------------------------------------------------------------------------------
@@ -177,8 +197,8 @@ class PointerInStatementsCreator(InStatementsCreator):
         """ % {
             't': to_cc(self._type.get_pointee()),
             'u': unique_str(),
-            'cc': self._cc_prefix,
-            'oz': self._oz_name,
+            'cc': self.cc_prefix,
+            'oz': self.oz_in_name,
         }
 
 #-------------------------------------------------------------------------------
@@ -187,7 +207,7 @@ def get_statement_creators(func_cursor, c_func_name):
     inouts = SPECIAL_INOUTS.get(c_func_name, {})
     globals_dict = globals()
 
-    def decode_inout(arg_name, default, real_arg_name, typ):
+    def decode_inout(arg_name, default, typ):
         inout_tuple = default
         try:
             inout_tuple = inouts[arg_name]
@@ -203,8 +223,7 @@ def get_statement_creators(func_cursor, c_func_name):
 
         creator = globals_dict[inout + 'StatementsCreator']()
         creator._context = context
-        creator._oz_name = real_arg_name
-        creator._cc_name = 'x_cc_' + real_arg_name
+        creator._name = arg_name
         creator._type = typ
         return creator
 
@@ -213,12 +232,12 @@ def get_statement_creators(func_cursor, c_func_name):
             continue
 
         arg_name = name_of(arg)
-        yield decode_inout(arg_name, 'In', arg_name, arg.type)
+        yield decode_inout(arg_name, 'In', arg.type)
 
 
     return_type = func_cursor.result_type.get_canonical()
     if return_type.kind != TypeKind.VOID:
-        yield decode_inout('return', 'Out', 'x_oz_return', PointerOf(return_type))
+        yield decode_inout('return', 'Out', PointerOf(return_type))
 
 
 def get_cc_function_definition(func_cursor, c_func_name):
@@ -239,30 +258,34 @@ def get_cc_function_definition(func_cursor, c_func_name):
         pass
 
     for creator in creators:
-        creator.with_declaration = True
+        creator._with_declaration = True
         cc_statements.append(creator.pre())
 
-    call_args = (creator.cc_name for creator in creators
-                                 if creator.oz_name != 'x_oz_return')
+    call_args = (creator.cc_name for creator in creators if creator._name != 'return')
     call_statement = c_func_name + '(' + ', '.join(call_args) + ');'
     if func_cursor.result_type.get_canonical().kind != TypeKind.VOID:
-        call_statement = '*x_cc_x_oz_return = ' + call_statement
+        call_statement = '*' + CC_NAME_OF_RETURN + ' = ' + call_statement
     cc_statements.append(call_statement)
 
     for creator in creators:
-        creator.with_declaration = False
+        creator._with_declaration = False
         cc_statements.append(creator.post())
 
-    arg_proto = ''.join(', ' + creator.oz_inout + ' ' + creator.oz_name
-                        for creator in creators
-                        if creator.oz_inout is not None and creator.oz_name != 'return')
+    arg_proto = []
+    for creator in creators:
+        inout = creator.get_oz_inout()
+        if inout in {'In', 'InOut'}:
+            arg_proto.append(', In ' + creator.oz_in_name)
+        if inout in {'Out', 'InOut'}:
+            arg_proto.append(', Out ' + creator.oz_out_name)
 
     try:
         cc_statements.append(FUNCTION_TEARDOWN[c_func_name])
     except KeyError:
         pass
 
-    return (arg_proto, cc_statements)
+    return (''.join(arg_proto), cc_statements)
 
-__all__ = ['get_cc_function_definition']
+__all__ = ['get_cc_function_definition', 'CC_NAME_OF_RETURN',
+           'cc_name_of', 'oz_in_name_of', 'oz_out_name_of']
 

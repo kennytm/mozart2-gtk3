@@ -113,3 +113,18 @@ def name_of(node):
     else:
         return ''
 
+#-------------------------------------------------------------------------------
+
+def cc_name_of(name):
+    return '_x_cc_' + name
+
+def oz_in_name_of(name):
+    return '_x_in_' + name
+
+def oz_out_name_of(name):
+    return '_x_out_' + name
+
+CC_NAME_OF_RETURN = cc_name_of('return')
+
+
+

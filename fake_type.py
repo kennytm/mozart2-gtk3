@@ -23,5 +23,22 @@ class PointerOf:
     def __init__(self, typ):
         self._type = typ
 
+class IntType:
+    @property
+    def kind(self):
+        return TypeKind.INT
+
+    def get_canonical(self):
+        return self
+
+    def is_const_qualified(self):
+        return False
+
+    def is_volatile_qualified(self):
+        return False
+
+    def is_restrict_qualified(self):
+        return False
+
 __all__ = ['PointerOf']
 
