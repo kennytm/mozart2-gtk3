@@ -22,7 +22,7 @@ SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
         {'dx': 'InOut', 'dy': 'InOut'},
     'cairo_(?:path|stroke|fill|clip)_extents$':
         {'x1': 'Out', 'x2': 'Out', 'y1': 'Out', 'y2': 'Out'},
-    'cairo_get_font_matrix$':
+    'cairo_get_(?:font_)?matrix$':
         {'matrix': 'Out'},
     'cairo_scaled_font_get_(?:ctm|(?:font|scale)_matrix)$':
         {'ctm': 'Out', 'scale_matrix': 'Out', 'font_matrix': 'Out'},
@@ -35,6 +35,10 @@ SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
     'cairo_(?:(?:scaled_font_)?(?:text|glyph)|(?:scaled_)?font)_extents$':
         {'extents': 'Out',
          'num_glyphs': 'Skip', 'glyphs': ('ListIn', 'num_glyphs')},
+    'cairo_scaled_font_text_to_glyphs':
+        {'glyphs': ('ListOut', 'num_glyphs'), 'num_glyphs': 'Skip',
+         'clusters': ('ListOut', 'num_clusters'), 'num_clusters': 'Skip',
+         'cluster_flags': 'Out', 'utf8_len': ('Constant', '-1')}
 }.items()]
 
 FUNCTION_SETUP = {}
@@ -44,36 +48,39 @@ FUNCTION_TEARDOWN = {
         'cairo_rectangle_list_destroy(*' + CC_NAME_OF_RETURN + ');',
     'cairo_copy_path':
         'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
+    'cairo_copy_path_flat':
+        'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
 }
 
 SPECIAL_INOUTS_FOR_TYPES = {
     'cairo_destroy_func_t': ('NodeDeleter', 0),
     'cairo_user_data_key_t const *': 'AddressIn',
     'cairo_matrix_t const *': 'PointerIn',
+    'cairo_path_t const *': 'PointerIn',
 }
 
 SPECIAL_TYPES = {
-    'cairo_path_t': ("""
+    'cairo_path': ("""
         OzListBuilder nodes (vm);
         int i = 0;
-        while (i < cc->num_data)
+        while (i < cc.num_data)
         {
-            auto data = &cc->data[i];
+            auto data = &cc.data[i];
             switch (data->header.type)
             {
                 case CAIRO_PATH_MOVE_TO:
                     nodes.push_back(vm, buildTuple(vm, MOZART_STR("moveTo"),
-                                                   data[1].x, data[1].y));
+                                                   data[1].point.x, data[1].point.y));
                     break;
                 case CAIRO_PATH_LINE_TO:
                     nodes.push_back(vm, buildTuple(vm, MOZART_STR("lineTo"),
-                                                   data[1].x, data[1].y));
+                                                   data[1].point.x, data[1].point.y));
                     break;
                 case CAIRO_PATH_CURVE_TO:
                     nodes.push_back(vm, buildTuple(vm, MOZART_STR("curveTo"),
-                                                   data[1].x, data[1].y,
-                                                   data[2].x, data[2].y,
-                                                   data[3].x, data[3].y));
+                                                   data[1].point.x, data[1].point.y,
+                                                   data[2].point.x, data[2].point.y,
+                                                   data[3].point.x, data[3].point.y));
                     break;
                 case CAIRO_PATH_CLOSE_PATH:
                     nodes.push_back(vm, MOZART_STR("closePath"));
@@ -83,7 +90,61 @@ SPECIAL_TYPES = {
         }
 
         return nodes.get(vm);
-    """, None)
+    """, """
+        std::vector<cairo_path_data_t> data_list;
+        ozListForEach(vm, oz, [vm, &data_list](RichNode node) {
+            using namespace mozart::patternmatching;
+
+            double x1, y1, x2, y2, x3, y3;
+            cairo_path_data_t data[4];
+
+            if (matchesTuple(vm, node, MOZART_STR("moveTo"), capture(x1), capture(y1)))
+            {
+                data[0].header.type = CAIRO_PATH_MOVE_TO;
+                data[0].header.length = 2;
+                data[1].point.x = x1;
+                data[1].point.y = y1;
+                data_list.insert(data_list.end(), data, data+2);
+            }
+            else if (matchesTuple(vm, node, MOZART_STR("lineTo"), capture(x1), capture(y1)))
+            {
+                data[0].header.type = CAIRO_PATH_LINE_TO;
+                data[0].header.length = 2;
+                data[1].point.x = x1;
+                data[1].point.y = y1;
+                data_list.insert(data_list.end(), data, data+2);
+            }
+            else if (matchesTuple(vm, node, MOZART_STR("curveTo"), capture(x1), capture(y1),
+                                                                   capture(x2), capture(y2),
+                                                                   capture(x3), capture(y3)))
+            {
+                data[0].header.type = CAIRO_PATH_LINE_TO;
+                data[0].header.length = 4;
+                data[1].point.x = x1;
+                data[1].point.y = y1;
+                data[2].point.x = x2;
+                data[2].point.y = y2;
+                data[3].point.x = x3;
+                data[3].point.y = y3;
+                data_list.insert(data_list.end(), data, data+4);
+            }
+            else if (matches(vm, node, MOZART_STR("closePath")))
+            {
+                data[0].header.type = CAIRO_PATH_CLOSE_PATH;
+                data[0].header.length = 1;
+                data_list.push_back(data[0]);
+            }
+            else
+            {
+                raiseTypeError(vm, MOZART_STR("cairo_path_data_t"), node);
+            }
+        }, MOZART_STR("cairo_path_data_t"));
+
+        cc.status = CAIRO_STATUS_SUCCESS;
+        cc.num_data = data_list.size();
+        cc.data = new (vm) cairo_path_data_t[cc.num_data];
+        memcpy(cc.data, data_list.data(), sizeof(*cc.data) * cc.num_data);
+    """)
 }
 
 OPAQUE_STRUCTS = set()

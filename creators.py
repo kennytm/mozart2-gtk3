@@ -191,6 +191,32 @@ class ListInStatementsCreator(InStatementsCreator):
         }
 
 #-------------------------------------------------------------------------------
+# 'ListOut' type
+
+class ListOutStatementsCreator(OutStatementsCreator):
+    def __init__(self):
+        super().__init__()
+        self._cc_array_length_name = unique_str()
+
+    def pre(self):
+        return super().pre() + """
+            int %(u)s;
+            auto %(cc)s = &%(u)s;
+        """ % {
+            'cc': cc_name_of(self._context),
+            'u': self._cc_array_length_name
+        }
+
+    def post(self):
+        return """
+            %(oz)s = buildDynamicList(vm, *(%(cc)s), *(%(cc)s) + %(u)s);
+        """ % {
+            'oz': self.oz_out_prefix,
+            'cc': self.cc_name,
+            'u': self._cc_array_length_name
+        }
+
+#-------------------------------------------------------------------------------
 # 'PointerIn' type
 
 class PointerInStatementsCreator(InStatementsCreator):
