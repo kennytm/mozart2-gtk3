@@ -64,6 +64,29 @@ def common_unbuild_functions():
         {
             return ::mozart::build(vm, value);
         }
+
+        static void* wrapNode(VM vm, RichNode node)
+        {
+            return new std::pair<ProtectedNode, VM>(ozProtect(vm, node), vm);
+        }
+
+        static UnstableNode unwrapNode(void* data)
+        {
+            auto pair = static_cast<std::pair<ProtectedNode, VM>*>(data);
+            if (pair != nullptr)
+                return UnstableNode(pair->second, *pair->first);
+            else
+                return build(pair->second, unit);
+        }
+
+        static void deleteWrappedNode(void* data)
+        {
+            if (data == nullptr)
+                return;
+            auto pair = static_cast<std::pair<ProtectedNode, VM>*>(data);
+            ozUnprotect(pair->second, pair->first);
+            delete pair;
+        }
     """
 
 #-------------------------------------------------------------------------------

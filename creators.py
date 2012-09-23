@@ -115,22 +115,14 @@ class InOutStatementsCreator(OutStatementsCreator):
 
 class NodeOutStatementsCreator(OutStatementsCreator):
     def post(self):
-        return """
-            auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(*(%(cc)s));
-            if (%(u)s != nullptr)
-                %(oz)s = UnstableNode(vm, *%(u)s->first);
-            else
-                %(oz)s = build(vm, unit);
-        """ % {'oz':self.oz_out_prefix, 'cc':self.cc_name, 'u':unique_str()}
+        return self.oz_out_prefix + ' = unwrapNode(*(' + self.cc_name + '));'
 
 #-------------------------------------------------------------------------------
 # 'NodeIn' type
 
 class NodeInStatementsCreator(InStatementsCreator):
     def pre(self):
-        return """
-            %s = new std::pair<ProtectedNode, VM>(ozProtect(vm, %s), vm);
-        """ % (self.cc_prefix, self.oz_in_name)
+        return self.cc_prefix + ' = wrapNode(vm, ' + self.oz_in_name + ');'
 
 #-------------------------------------------------------------------------------
 # 'NodeDeleter' type
@@ -141,12 +133,8 @@ class NodeDeleterStatementsCreator(StatementsCreator):
         lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i))
                                 for i, subtype in enumerate(args))
         return """
-            %(p)s = [](%(l)s) {
-                auto %(u)s = static_cast<std::pair<ProtectedNode, VM>*>(x_lambda_%(n)s);
-                ozUnprotect(%(u)s->second, %(u)s->first);
-                delete %(u)s;
-            };
-        """ % {'p':self.cc_prefix, 'l':lambda_args, 'u':unique_str(), 'n':self._context}
+            %s = [](%s) { deleteWrappedNode(x_lambda_%s); };
+        """ % (self.cc_prefix, lambda_args, self._context)
 
 #-------------------------------------------------------------------------------
 # 'AddressIn' type
