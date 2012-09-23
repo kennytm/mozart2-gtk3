@@ -1,12 +1,14 @@
 import re
-from common import CC_NAME_OF_RETURN, cc_name_of
+from common import CC_NAME_OF_RETURN, cc_name_of, unique_str
 
 BLACKLISTED = [re.compile(p) for p in [
     '__va_list_tag$',
     'cairo_(?:rectangle_list|path)_destroy$',
     # ^ we don't need to call these functions at all.
     'cairo_(?:glyph|text_cluster)_(?:allocate|free)$',
-    # ^ we will allocate them on behalf of the users.
+    # ^ we will destroy them on behalf of the users.
+    'cairo_user_(?:scaled_font|font_face)',
+    # ^ TODO: restore these functions.
 ]]
 
 SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
@@ -31,12 +33,16 @@ SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
     'cairo_(?:(?:scaled_font_)?(?:text|glyph)|(?:scaled_)?font)_extents$':
         {'extents': 'Out'},
     'cairo_scaled_font_text_to_glyphs':
-        {'cluster_flags': 'Out', 'utf8_len': ('Constant', '-1')}
+        {'cluster_flags': 'Out', 'utf8_len': ('Constant', '-1')},
 }.items()]
 
-FUNCTION_SETUP = {}
+FUNCTION_PRE_SETUP = {}
 
-FUNCTION_TEARDOWN = {
+FUNCTION_POST_SETUP = {}
+
+FUNCTION_PRE_TEARDOWN = {}
+
+FUNCTION_POST_TEARDOWN = {
     'cairo_copy_clip_rectangle_list':
         'cairo_rectangle_list_destroy(*' + CC_NAME_OF_RETURN + ');',
     'cairo_copy_path':
@@ -140,6 +146,20 @@ SPECIAL_TYPES = {
         cc.data = new (vm) cairo_path_data_t[cc.num_data];
         memcpy(cc.data, data_list.data(), sizeof(*cc.data) * cc.num_data);
     """)
+}
+
+SPECIAL_FUNCTIONS = {
+    'cairo_get_dash':
+        (', In cr, Out dashes, Out offset', ["""
+            cairo_t* cc_cr;
+            unbuild(vm, cr, cc_cr);
+            int cc_num_dashes = cairo_get_dash_count(cc_cr);
+            std::unique_ptr<double[]> cc_dashes (new double[cc_num_dashes]);
+            double cc_offset;
+            cairo_get_dash(cc_cr, cc_dashes.get(), &cc_offset);
+            dashes = buildDynamicList(vm, cc_dashes.get(), cc_dashes.get() + cc_num_dashes);
+            offset = build(vm, cc_offset);
+        """])
 }
 
 OPAQUE_STRUCTS = set()

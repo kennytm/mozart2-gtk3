@@ -244,6 +244,11 @@ def get_cc_function_definition(func_cursor, c_func_name):
     list of C++ statements of the built-in procedure.
     """
 
+    try:
+        return SPECIAL_FUNCTIONS[c_func_name]
+    except KeyError:
+        pass
+
     pre_fixup_creators = get_statement_creators(func_cursor, c_func_name)
     pre_fixup_creators_dict = OrderedDict((c._name, c) for c in pre_fixup_creators)
     fixup_args(pre_fixup_creators_dict)
@@ -252,13 +257,18 @@ def get_cc_function_definition(func_cursor, c_func_name):
     cc_statements = []
 
     try:
-        cc_statements.append(FUNCTION_SETUP[c_func_name])
+        cc_statements.append(FUNCTION_PRE_SETUP[c_func_name])
     except KeyError:
         pass
 
     for creator in creators:
         creator._with_declaration = True
         cc_statements.append(creator.pre())
+
+    try:
+        cc_statements.append(FUNCTION_POST_SETUP[c_func_name])
+    except KeyError:
+        pass
 
     call_args = (creator.cc_name for creator in creators if creator._name != 'return')
     call_statement = c_func_name + '(' + ', '.join(call_args) + ');'
@@ -270,6 +280,11 @@ def get_cc_function_definition(func_cursor, c_func_name):
         creator._with_declaration = False
         cc_statements.append(creator.post())
 
+    try:
+        cc_statements.append(FUNCTION_PRE_TEARDOWN[c_func_name])
+    except KeyError:
+        pass
+
     arg_proto = []
     for creator in creators:
         inout = creator.get_oz_inout()
@@ -279,7 +294,7 @@ def get_cc_function_definition(func_cursor, c_func_name):
             arg_proto.append(', Out ' + creator.oz_out_name)
 
     try:
-        cc_statements.append(FUNCTION_TEARDOWN[c_func_name])
+        cc_statements.append(FUNCTION_POST_TEARDOWN[c_func_name])
     except KeyError:
         pass
 
