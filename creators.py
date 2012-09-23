@@ -31,7 +31,11 @@ class StatementsCreator:
         return self._make_prefix(self.oz_out_name)
 
     def __copy__(self):
-        new_copy = type(self)()
+        return self.copy_as_type(type(self))
+
+    def copy_as_type(self, new_type):
+        assert issubclass(new_type, StatementsCreator)
+        new_copy = new_type()
         new_copy._type = self._type
         new_copy._name = self._name
         new_copy._with_declaration = self._with_declaration
@@ -49,6 +53,10 @@ class StatementsCreator:
 
     def post(self):
         return ""
+
+    def __init__(self):
+        self._with_declaration = False
+        self._context = None
 
 #-------------------------------------------------------------------------------
 # "Out" type.

@@ -7,9 +7,6 @@ from fake_type import PointerOf
 from to_cc import to_cc
 import creators
 
-def is_concrete(struct_decl):
-    return struct_decl.is_definition() and name_of(struct_decl) not in OPAQUE_STRUCTS
-
 #-------------------------------------------------------------------------------
 
 def common_unbuild_functions():

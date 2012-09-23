@@ -14,8 +14,6 @@ SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
         {'return': 'NodeOut'},
     'cairo_(?:font_face_|scaled_font_)?set_user_data$':
         {'user_data': 'NodeIn'},
-    'cairo_set_dash$':
-        {'dashes': ('ListIn', 'num_dashes'), 'num_dashes': 'Skip'},
     'cairo_(?:user_to_device|device_to_user)$':
         {'x': 'InOut', 'y': 'InOut'},
     'cairo_(?:user_to_device|device_to_user)_distance$':
@@ -29,16 +27,11 @@ SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
     'cairo_get_current_point$':
         {'x': 'Out', 'y': 'Out'},
     'cairo_(?:show_(?:text_)?glyphs|glyph_path)$':
-        {'glyphs': ('ListIn', 'num_glyphs'), 'num_glyphs': 'Skip',
-         'clusters': ('ListIn', 'num_clusters'), 'num_clusters': 'Skip',
-         'utf8_len': ('Constant', '-1')},
+        {'utf8_len': ('Constant', '-1')},
     'cairo_(?:(?:scaled_font_)?(?:text|glyph)|(?:scaled_)?font)_extents$':
-        {'extents': 'Out',
-         'num_glyphs': 'Skip', 'glyphs': ('ListIn', 'num_glyphs')},
+        {'extents': 'Out'},
     'cairo_scaled_font_text_to_glyphs':
-        {'glyphs': ('ListOut', 'num_glyphs'), 'num_glyphs': 'Skip',
-         'clusters': ('ListOut', 'num_clusters'), 'num_clusters': 'Skip',
-         'cluster_flags': 'Out', 'utf8_len': ('Constant', '-1')}
+        {'cluster_flags': 'Out', 'utf8_len': ('Constant', '-1')}
 }.items()]
 
 FUNCTION_SETUP = {}
@@ -55,8 +48,6 @@ FUNCTION_TEARDOWN = {
 SPECIAL_INOUTS_FOR_TYPES = {
     'cairo_destroy_func_t': ('NodeDeleter', 0),
     'cairo_user_data_key_t const *': 'AddressIn',
-    'cairo_matrix_t const *': 'PointerIn',
-    'cairo_path_t const *': 'PointerIn',
 }
 
 SPECIAL_TYPES = {
