@@ -182,7 +182,7 @@ SPECIAL_TYPES = {
 
 SPECIAL_FUNCTIONS = {
     'cairo_get_dash':
-        (', In cr, Out dashes, Out offset', ["""
+        (', In cr, Out dashes, Out offset', """
             cairo_t* cc_cr;
             unbuild(vm, cr, cc_cr);
             int cc_num_dashes = cairo_get_dash_count(cc_cr);
@@ -191,9 +191,9 @@ SPECIAL_FUNCTIONS = {
             cairo_get_dash(cc_cr, cc_dashes.get(), &cc_offset);
             dashes = buildDynamicList(vm, cc_dashes.get(), cc_dashes.get() + cc_num_dashes);
             offset = build(vm, cc_offset);
-        """]),
+        """),
     'cairo_image_surface_get_data':
-        (', In surface, Out data', ["""
+        (', In surface, Out data', """
             cairo_surface_t* cc_surface;
             unbuild(vm, surface, cc_surface);
             int height = cairo_image_surface_get_height(cc_surface);
@@ -201,7 +201,7 @@ SPECIAL_FUNCTIONS = {
             int length = height * stride;
             auto cc_data = cairo_image_surface_get_data(cc_surface);
             data = ByteString::build(vm, newLString(vm, cc_data, length));
-        """]),
+        """),
 }
 
 OPAQUE_STRUCTS = set()

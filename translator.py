@@ -8,10 +8,11 @@ from clang.cindex import TranslationUnit, Config, CursorKind
 from constants import *
 from builders import *
 from common import *
+from ccformat import CCFormatter
 
 Config.set_compatibility_check(False)
 
-def create_datatype(struct_name):
+def write_datatype(types_decl_hh, types_hh, struct_name):
     """
     Create a Mozart/Oz DataType, given the name of an incomplete C structure.
     The generated DataType will then be based on a C pointer of that structure.
@@ -21,14 +22,12 @@ def create_datatype(struct_name):
 
     params = {'s': struct_name}
 
-    return ("""
-        namespace m2g3
-        {
+    types_decl_hh.write("""
+        namespace m2g3 {
             class D_%(s)s;
         }
 
-        namespace mozart
-        {
+        namespace mozart {
             using m2g3::D_%(s)s;
 
             #ifndef MOZART_GENERATOR
@@ -36,16 +35,14 @@ def create_datatype(struct_name):
             #endif
         }
 
-        namespace m2g3
-        {
-            class D_%(s)s : public ::mozart::DataType<D_%(s)s>, ::mozart::StoredAs<%(s)s*>
-            {
+        namespace m2g3 {
+            class D_%(s)s : public ::mozart::DataType<D_%(s)s>, ::mozart::StoredAs<%(s)s*> {
             public:
                 typedef ::mozart::SelfType<D_%(s)s>::Self Self;
 
                 D_%(s)s(%(s)s* value) : _value(value) {}
 
-                static void create(%(s)s*& self, ::mozart::VM vm, %(s)s* value) {self = value; }
+                static void create(%(s)s*& self, ::mozart::VM vm, %(s)s* value) { self = value; }
                 static inline void create(%(s)s*& self, ::mozart::VM vm, ::mozart::GR gr, Self from);
 
                 %(s)s* value() const { return _value; }
@@ -64,7 +61,9 @@ def create_datatype(struct_name):
             #endif
 
         }
-    """ % params, """
+    """ % params)
+
+    types_hh.write("""
         namespace mozart {
             using m2g3::D_%(s)s;
             #include "D_%(s)s-implem.hh"
@@ -85,34 +84,34 @@ def is_blacklisted(name):
 
 class Translator:
     """
-    This class exists mainly just to hold the states.
+    This class exists mainly just to hold the files.
     """
 
     def __init__(self, module):
         self._module = module
-        self._cc_file = open(join(SRC, module + CC_EXT), 'w')
-        self._hh_file = open(join(SRC, module + HH_EXT), 'w')
-        self._types_hh_file = open(join(SRC, module + TYPES_HH_EXT), 'w')
-        self._types_decl_hh_file = open(join(SRC, module + TYPES_DECL_HH_EXT), 'w')
-
-    def _all_files(self):
-        return [self._cc_file, self._hh_file,
-                self._types_decl_hh_file, self._types_hh_file]
+        self._cc = CCFormatter()
+        self._hh = CCFormatter()
+        self._types_hh = CCFormatter()
+        self._types_decl_hh = CCFormatter()
 
     def __enter__(self):
-        for f in self._all_files():
-            f.__enter__()
         return self
 
     def __exit__(self, p, q, r):
-        handled = False
-        for f in reversed(self._all_files()):
-            handled = f.__exit__(p, q, r)
-            if handled:
-                p = q = r = None
-        return handled
+        ext_and_formatters = [
+            (CC_EXT, self._cc),
+            (HH_EXT, self._hh),
+            (TYPES_HH_EXT, self._types_hh),
+            (TYPES_DECL_HH_EXT, self._types_decl_hh),
+        ]
 
-    def _print_header(self):
+        for ext, formatter in ext_and_formatters:
+            with open(join(SRC, self._module + ext), 'w') as f:
+                f.writelines(formatter.lines)
+
+        return False
+
+    def _write_header(self):
         """
         Print the C++ headers to all files.
         """
@@ -122,41 +121,37 @@ class Translator:
             'hh-file': self._module,
             'hh-ext': HH_EXT,
             'types-decl-hh-ext': TYPES_DECL_HH_EXT,
-            'common-header': """
-                #include <mozart.hh>
-
-                namespace m2g3 {
-
-                using namespace mozart;
-                using namespace mozart::builtins;
-            """
         }
 
-        self._hh_file.write("""
+        self._hh.write("""
             #ifndef %(guard)s
             #define %(guard)s
 
-            %(common-header)s
+            #include <mozart.hh>
 
-            struct M_%(mod)s : Module
-            {
-                M_%(mod)s() : Module("%(mod)s") {}
+            namespace m2g3 {
+
+                using namespace mozart;
+                using namespace mozart::builtins;
+
+                struct M_%(mod)s : Module {
+                    M_%(mod)s() : Module("%(mod)s") {}
         """ % format_params)
 
-        self._cc_file.write("""
+        self._cc.write("""
             #include <unordered_map>
             #include <vector>
             #include <type_traits>
             #include "%(hh-file)s%(hh-ext)s"
             #include "%(mod)s%(types-decl-hh-ext)s"
 
-            %(common-header)s
+            namespace m2g3 {
 
+                using namespace mozart;
+                using namespace mozart::builtins;
         """ % format_params)
 
-        self._cc_file.writelines(common_unbuild_functions())
-
-        self._types_decl_hh_file.write("""
+        self._types_decl_hh.write("""
             #ifndef %(guard)s_DATATYPES_DECL
             #define %(guard)s_DATATYPES_DECL
 
@@ -164,7 +159,7 @@ class Translator:
             #include <mozart.hh>
         """ % format_params)
 
-        self._types_hh_file.write("""
+        self._types_hh.write("""
             #ifndef %(guard)s_DATATYPES
             #define %(guard)s_DATATYPES
 
@@ -172,86 +167,65 @@ class Translator:
         """ % format_params)
 
 
-    def _print_footer(self):
+    def _write_footer(self):
         """
         Print the C++ footers to all files.
         """
-        self._hh_file.write("""
+
+        self._hh.write("""
             };
-
             }
-
             #endif
         """)
 
-        self._cc_file.write("""
+        self._cc.write("}")
+        self._types_decl_hh.write("#endif")
+        self._types_hh.write("""
             }
-        """)
-
-        self._types_decl_hh_file.write("""
             #endif
         """)
 
-        self._types_hh_file.write("""
-            }
-
-            #endif
-        """)
-
-    def _print_type(self, type_node):
+    def _write_type(self, type_node):
         """
         Print a single type.
         """
         if is_blacklisted(name_of(type_node)):
             return
 
-        self._cc_file.write(builder(type_node))
+        write_builder(self._cc, type_node)
 
         if type_node.kind == CursorKind.STRUCT_DECL and not is_concrete(type_node):
-            (decl_hh, hh) = create_datatype(name_of(type_node))
-            self._types_decl_hh_file.writelines(decl_hh)
-            self._types_hh_file.write(hh)
+            write_datatype(self._types_decl_hh, self._types_hh, name_of(type_node))
 
-    def _print_function(self, function):
+    def _write_function(self, function):
         """
         Print a single function.
         """
         source_func_name = name_of(function)
-        try:
-            (arg_proto, cc_statements) = get_cc_function_definition(function, source_func_name)
-        except NotImplementedError as e:
-            print('Note: Current function = ' + source_func_name, file=sys.stderr)
-            raise
+        function_creators = get_cc_function_definition(function, source_func_name)
 
         params = {
             'target': strip_prefix_and_camelize(source_func_name),
-            'args': arg_proto,
+            'args': get_cc_arg_proto(function_creators, source_func_name),
             'mod': self._module,
         }
 
-        self._hh_file.write("""
-                struct P_%(target)s : Builtin<P_%(target)s>
-                {
-                    P_%(target)s() : Builtin("%(target)s") {}
-                    void operator()(VM vm%(args)s);
-                };
+        self._hh.write("""
+            struct P_%(target)s : Builtin<P_%(target)s> {
+                P_%(target)s() : Builtin("%(target)s") {}
+                void operator()(VM vm%(args)s);
+            };
         """ % params)
 
-        self._cc_file.write("""
-            void M_%(mod)s::P_%(target)s::operator()(VM vm%(args)s)
-            {
+        self._cc.write("""
+            void M_%(mod)s::P_%(target)s::operator()(VM vm%(args)s) {
         """ % params)
-        for statement in cc_statements:
-            self._cc_file.write('\n')
-            self._cc_file.write(statement)
-        self._cc_file.write("}\n")
 
-    def print(self):
-        """
-        Print everything into the files.
-        """
-        self._print_header()
+        write_cc_function_definition(self._cc, function_creators, source_func_name)
 
+        self._cc.write("}")
+
+    def _collect_nodes(self):
         types = []
         functions = []
 
@@ -264,16 +238,30 @@ class Translator:
             elif kind in {CursorKind.STRUCT_DECL, CursorKind.ENUM_DECL}:
                 types.append(node)
 
-        for type_node in types:
-            self._print_type(type_node)
-        for function in functions:
-            self._print_function(function)
+        return (types, functions)
 
-        self._print_footer()
+
+    def write(self):
+        """
+        Print everything into the files.
+        """
+        (types, functions) = self._collect_nodes()
+
+        self._write_header()
+
+        write_common_builders_pre(self._cc)
+        for type_node in types:
+            self._write_type(type_node)
+        write_common_builders_post(self._cc)
+
+        for function in functions:
+            self._write_function(function)
+
+        self._write_footer()
 
 def main(module):
     with Translator(module) as tr:
-        tr.print()
+        tr.write()
 
 if __name__ == '__main__':
     if len(sys.argv) <= 1:

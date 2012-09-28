@@ -46,13 +46,14 @@ class StatementsCreator:
     def get_oz_inout():
         return None
 
-    def pre(self):
+    def pre(self, formatter):
         cc_complete_name = unique_str()
         cc_decl = to_cc(self._type.get_pointee(), cc_complete_name)
-        return "%s {}; %s = &%s;" % (cc_decl, self.cc_prefix, cc_complete_name)
+        formatter.write(cc_decl + ' {};')
+        formatter.write(self.cc_prefix + ' = &' + cc_complete_name + ';')
 
-    def post(self):
-        return ""
+    def post(self, formatter):
+        pass
 
     def __init__(self):
         self._with_declaration = False
@@ -66,8 +67,8 @@ class OutStatementsCreator(StatementsCreator):
     def get_oz_inout():
         return 'Out'
 
-    def post(self):
-        return self.oz_out_prefix + ' = build(vm, *' + self.cc_name + ');'
+    def post(self, formatter):
+        formatter.write(self.oz_out_prefix + ' = build(vm, *' + self.cc_name + ');')
 
 #-------------------------------------------------------------------------------
 # "In" type.
@@ -77,11 +78,10 @@ class InStatementsCreator(StatementsCreator):
     def get_oz_inout():
         return 'In'
 
-    def pre(self):
-        expr = 'unbuild(vm, ' + self.oz_in_name + ', ' + self.cc_name + ');'
+    def pre(self, formatter):
         if self._with_declaration:
-            expr = to_cc(self._type, self.cc_name) + ';\n' + expr
-        return expr
+            formatter.write(to_cc(self._type, self.cc_name) + ';')
+        formatter.write('unbuild(vm, ' + self.oz_in_name + ', ' + self.cc_name + ');')
 
 #-------------------------------------------------------------------------------
 # "InOut" type.
@@ -91,80 +91,72 @@ class InOutStatementsCreator(OutStatementsCreator):
     def get_oz_inout():
         return 'InOut'
 
-    def pre(self):
+    def pre(self, formatter):
         in_creator = InStatementsCreator()
         in_creator._type = self._type.get_pointee()
         in_creator._name = unique_str()
         in_creator._with_declaration = True
         in_creator._context = self._context
 
-        return """
-            auto& %(uoz)s = %(oz)s;
-            %(pre)s
-            %(cc)s = &%(ucc)s;
-        """ % {
-            'pre': in_creator.pre(),
-            'cc': self.cc_prefix,
-            'ucc': in_creator.cc_name,
-            'uoz': in_creator.oz_in_name,
-            'oz': self.oz_in_name,
-        }
+        formatter.write('auto &' + in_creator.oz_in_name + ' = ' + self.oz_in_name + ';')
+        in_creator.pre(formatter)
+        formatter.write(self.cc_prefix + ' = &' + in_creator.cc_name + ';')
 
 #-------------------------------------------------------------------------------
 # 'NodeOut' type
 
 class NodeOutStatementsCreator(OutStatementsCreator):
-    def post(self):
-        return self.oz_out_prefix + ' = unwrapNode(*(' + self.cc_name + '));'
+    def post(self, formatter):
+        formatter.write(self.oz_out_prefix + ' = unwrapNode(*(' + self.cc_name + '));')
 
 #-------------------------------------------------------------------------------
 # 'NodeIn' type
 
 class NodeInStatementsCreator(InStatementsCreator):
-    def pre(self):
-        return self.cc_prefix + ' = wrapNode(vm, ' + self.oz_in_name + ');'
+    def pre(self, formatter):
+        formatter.write(self.cc_prefix + ' = wrapNode(vm, ' + self.oz_in_name + ');')
 
 #-------------------------------------------------------------------------------
 # 'NodeDeleter' type
 
 class NodeDeleterStatementsCreator(StatementsCreator):
-    def pre(self):
+    def pre(self, formatter):
         args = self._type.get_canonical().get_pointee().argument_types()
         lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i))
                                 for i, subtype in enumerate(args))
-        return """
+        formatter.write("""
             %s = [](%s) { deleteWrappedNode(x_lambda_%s); };
-        """ % (self.cc_prefix, lambda_args, self._context)
+        """ % (self.cc_prefix, lambda_args, self._context))
 
 #-------------------------------------------------------------------------------
 # 'AddressIn' type
 
 class AddressInStatementsCreator(InStatementsCreator):
-    def pre(self):
-        return """
+    def pre(self, formatter):
+        formatter.write("""
             %s = reinterpret_cast<%s>(IntegerValue(%s).intValue(vm));
-        """ % (self.cc_prefix, to_cc(self._type), self.oz_in_name)
+        """ % (self.cc_prefix, to_cc(self._type), self.oz_in_name))
 
 #-------------------------------------------------------------------------------
 # 'Skip' type
 
 class SkipStatementsCreator(StatementsCreator):
-    def pre(self):
-        return ""
+    def pre(self, formatter):
+        pass
 
 #-------------------------------------------------------------------------------
 # 'Constant' type
 
 class ConstantStatementsCreator(StatementsCreator):
-    def pre(self):
-        return "%s = %s;" % (self.cc_prefix, self._context)
+    def pre(self, formatter):
+        formatter.write(self.cc_prefix + ' = ' + self._context + ';')
 
 #-------------------------------------------------------------------------------
 # 'ListIn' type
 
 class ListInStatementsCreator(InStatementsCreator):
-    def pre(self):
-        return """
+    def pre(self, formatter):
+        formatter.write("""
             std::vector<std::remove_cv<%(t)s>::type> %(u)s;
             ozListForEach(vm, %(oz)s, [vm, &%(u)s](RichNode node) {
                 std::remove_cv<%(t)s>::type content;
@@ -179,7 +171,7 @@ class ListInStatementsCreator(InStatementsCreator):
             'oz': self.oz_in_name,
             'cc': self.cc_prefix,
             'len': cc_name_of(self._context),
-        }
+        })
 
 #-------------------------------------------------------------------------------
 # 'ListOut' type
@@ -189,30 +181,31 @@ class ListOutStatementsCreator(OutStatementsCreator):
         super().__init__()
         self._cc_array_length_name = unique_str()
 
-    def pre(self):
-        return super().pre() + """
+    def pre(self, formatter):
+        super().pre(formatter)
+        formatter.write("""
             int %(u)s = 0;
             auto %(cc)s = &%(u)s;
         """ % {
             'cc': cc_name_of(self._context),
             'u': self._cc_array_length_name
-        }
+        })
 
-    def post(self):
-        return """
+    def post(self, formatter):
+        formatter.write("""
             %(oz)s = buildDynamicList(vm, *(%(cc)s), *(%(cc)s) + %(u)s);
         """ % {
             'oz': self.oz_out_prefix,
             'cc': self.cc_name,
             'u': self._cc_array_length_name
-        }
+        })
 
 #-------------------------------------------------------------------------------
 # 'PointerIn' type
 
 class PointerInStatementsCreator(InStatementsCreator):
-    def pre(self):
-        return """
+    def pre(self, formatter):
+        formatter.write("""
             std::remove_cv<%(t)s>::type %(u)s;
             unbuild(vm, %(oz)s, %(u)s);
             %(cc)s = &%(u)s;
@@ -221,6 +214,6 @@ class PointerInStatementsCreator(InStatementsCreator):
             'u': unique_str(),
             'cc': self.cc_prefix,
             'oz': self.oz_in_name,
-        }
+        })
 
 
