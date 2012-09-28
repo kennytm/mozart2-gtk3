@@ -70,9 +70,8 @@ def write_datatype(types_decl_hh, types_hh, struct_name):
         }
 
         namespace m2g3 {
-            void D_%(s)s::create(%(s)s*& self, ::mozart::VM vm, ::mozart::GR gr, Self from)
-            {
-                self = from->_value;
+            void D_%(s)s::create(%(s)s*& self, ::mozart::VM vm, ::mozart::GR gr, Self from) {
+                self = from.get().value();
             }
         }
     """ % params)
@@ -121,6 +120,7 @@ class Translator:
             'hh-file': self._module,
             'hh-ext': HH_EXT,
             'types-decl-hh-ext': TYPES_DECL_HH_EXT,
+            'types-hh-ext': TYPES_HH_EXT,
         }
 
         self._hh.write("""
@@ -143,7 +143,7 @@ class Translator:
             #include <vector>
             #include <type_traits>
             #include "%(hh-file)s%(hh-ext)s"
-            #include "%(mod)s%(types-decl-hh-ext)s"
+            #include "%(mod)s%(types-hh-ext)s"
 
             namespace m2g3 {
 
@@ -180,10 +180,7 @@ class Translator:
 
         self._cc.write("}")
         self._types_decl_hh.write("#endif")
-        self._types_hh.write("""
-            }
-            #endif
-        """)
+        self._types_hh.write("#endif")
 
     def _write_type(self, type_node):
         """

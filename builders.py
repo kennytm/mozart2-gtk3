@@ -41,12 +41,7 @@ def write_common_builders_pre(cc):
         }
 
         template <typename It>
-        static UnstableNode buildDynamicList(VM vm, It begin, It end) {
-            OzListBuilder listBuilder (vm);
-            while (begin != end)
-                listBuilder.push_back(vm, *begin++);
-            return listBuilder.get(vm);
-        }
+        static UnstableNode buildDynamicList(VM vm, It begin, It end);
 
         template <typename T>
         static auto build(VM vm, T value)
@@ -93,6 +88,15 @@ def write_common_builders_post(cc):
             -> typename std::enable_if<!std::is_fundamental<T>::value, UnstableNode>::type
         {
             return build(vm, *ptr);
+        }
+
+        template <typename It>
+        static UnstableNode buildDynamicList(VM vm, It begin, It end) {
+            OzListBuilder listBuilder (vm);
+            while (begin != end) {
+                listBuilder.push_back(vm, build(vm, *begin++));
+            }
+            return listBuilder.get(vm);
         }
     """)
 

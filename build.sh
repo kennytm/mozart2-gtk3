@@ -25,6 +25,7 @@ g++ -std=c++11 \
     -I$MOZART_DIR/boostenv/main \
     -I$1.out \
     -I. \
+    -c \
     -o $1.o \
     $1.cc
 

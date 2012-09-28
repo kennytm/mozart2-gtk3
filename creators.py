@@ -158,7 +158,7 @@ class ListInStatementsCreator(InStatementsCreator):
     def pre(self, formatter):
         formatter.write("""
             std::vector<std::remove_cv<%(t)s>::type> %(u)s;
-            ozListForEach(vm, %(oz)s, [vm, &%(u)s](RichNode node) {
+            ozListForEach(vm, %(oz)s, [vm, &%(u)s](UnstableNode& node) {
                 std::remove_cv<%(t)s>::type content;
                 unbuild(vm, node, content);
                 %(u)s.push_back(std::move(content));

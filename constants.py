@@ -96,11 +96,9 @@ SPECIAL_TYPES = {
     'cairo_path': ("""
         OzListBuilder nodes (vm);
         int i = 0;
-        while (i < cc.num_data)
-        {
+        while (i < cc.num_data) {
             auto data = &cc.data[i];
-            switch (data->header.type)
-            {
+            switch (data->header.type) {
                 case CAIRO_PATH_MOVE_TO:
                     nodes.push_back(vm, buildTuple(vm, MOZART_STR("moveTo"),
                                                    data[1].point.x, data[1].point.y));
@@ -125,32 +123,27 @@ SPECIAL_TYPES = {
         return nodes.get(vm);
     """, """
         std::vector<cairo_path_data_t> data_list;
-        ozListForEach(vm, oz, [vm, &data_list](RichNode node) {
+        ozListForEach(vm, oz, [vm, &data_list](UnstableNode& node) {
             using namespace mozart::patternmatching;
 
             double x1, y1, x2, y2, x3, y3;
             cairo_path_data_t data[4];
 
-            if (matchesTuple(vm, node, MOZART_STR("moveTo"), capture(x1), capture(y1)))
-            {
+            if (matchesTuple(vm, node, MOZART_STR("moveTo"), capture(x1), capture(y1))) {
                 data[0].header.type = CAIRO_PATH_MOVE_TO;
                 data[0].header.length = 2;
                 data[1].point.x = x1;
                 data[1].point.y = y1;
                 data_list.insert(data_list.end(), data, data+2);
-            }
-            else if (matchesTuple(vm, node, MOZART_STR("lineTo"), capture(x1), capture(y1)))
-            {
+            } else if (matchesTuple(vm, node, MOZART_STR("lineTo"), capture(x1), capture(y1))) {
                 data[0].header.type = CAIRO_PATH_LINE_TO;
                 data[0].header.length = 2;
                 data[1].point.x = x1;
                 data[1].point.y = y1;
                 data_list.insert(data_list.end(), data, data+2);
-            }
-            else if (matchesTuple(vm, node, MOZART_STR("curveTo"), capture(x1), capture(y1),
-                                                                   capture(x2), capture(y2),
-                                                                   capture(x3), capture(y3)))
-            {
+            } else if (matchesTuple(vm, node, MOZART_STR("curveTo"), capture(x1), capture(y1),
+                                                                     capture(x2), capture(y2),
+                                                                     capture(x3), capture(y3))) {
                 data[0].header.type = CAIRO_PATH_LINE_TO;
                 data[0].header.length = 4;
                 data[1].point.x = x1;
@@ -160,15 +153,11 @@ SPECIAL_TYPES = {
                 data[3].point.x = x3;
                 data[3].point.y = y3;
                 data_list.insert(data_list.end(), data, data+4);
-            }
-            else if (matches(vm, node, MOZART_STR("closePath")))
-            {
+            } else if (matches(vm, node, MOZART_STR("closePath"))) {
                 data[0].header.type = CAIRO_PATH_CLOSE_PATH;
                 data[0].header.length = 1;
                 data_list.push_back(data[0]);
-            }
-            else
-            {
+            } else {
                 raiseTypeError(vm, MOZART_STR("cairo_path_data_t"), node);
             }
         }, MOZART_STR("cairo_path_data_t"));
