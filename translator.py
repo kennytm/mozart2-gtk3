@@ -134,6 +134,10 @@ class Translator:
                 using namespace mozart;
                 using namespace mozart::builtins;
 
+                #ifndef MOZART_BUILTIN_GENERATOR
+                #include "%(mod)s.out/%(mod)sbuiltins.hh"
+                #endif
+
                 struct M_%(mod)s : Module {
                     M_%(mod)s() : Module("%(mod)s") {}
         """ % format_params)
@@ -166,7 +170,6 @@ class Translator:
             #include "%(mod)s%(types-decl-hh-ext)s"
         """ % format_params)
 
-
     def _write_footer(self):
         """
         Print the C++ footers to all files.
@@ -178,7 +181,10 @@ class Translator:
             #endif
         """)
 
-        self._cc.write("}")
+        self._cc.write("""
+            #include "%(mod)s.out/%(mod)sbuiltins.cc"
+            }
+        """ % {'mod': self._module})
         self._types_decl_hh.write("#endif")
         self._types_hh.write("#endif")
 
