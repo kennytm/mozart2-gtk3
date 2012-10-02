@@ -1,4 +1,4 @@
-MOZART_SRC_DIR ?= $(realpath ../mozart2)
+MOZART_SRC_DIR ?= $(realpath ../mozart2-vm)
 MOZART_DIR ?= $(MOZART_SRC_DIR)/build/debug
 BOOTCOMPILER_DIR ?= $(realpath ../mozart2-bootcompiler)
 MOZART_LIB_DIR ?= $(realpath ../mozart2-library)
