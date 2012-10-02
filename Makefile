@@ -7,11 +7,12 @@ MODULE ?= cairo
 OUT_DIR = src/$(MODULE).out/
 BASE_ENV_TXT = $(OUT_DIR)baseenv.txt
 
-CreateAst = clang++ -std=c++11 -stdlib=libc++ -I$(MOZART_DIR)/vm/main -emit-ast
+CreateAst = clang++ -std=c++11 -stdlib=libc++ -Wno-return-type \
+                    -I$(MOZART_DIR)/vm/main -emit-ast
 Generator = $(MOZART_DIR)/generator/main/generator
 
 CXX = g++
-CXXFLAGS = -std=c++11 -I$(MOZART_DIR)/vm/main -I$(MOZART_DIR)/boostenv/main \
+CXXFLAGS = -std=c++11 -I$(MOZART_DIR)/vm/main -I$(MOZART_DIR)/boostenv/main -g \
            -I$(OUT_DIR) -Isrc
 OZBC = java -jar $(BOOTCOMPILER_DIR)/target/scala-2.9.1/bootcompiler_2.9.1-2.0-SNAPSHOT-one-jar.jar
 OZBCFLAGS = -h boostenv.hh -h $(MODULE).hh -b $(BASE_ENV_TXT) \
@@ -37,7 +38,8 @@ CC_RESULT = src/$(MODULE).o
 lib: $(CC_RESULT)
 
 $(TRANSLATION_RESULT): $(PYTHON_FILES)
-	python3 translator.py cairo
+	mkdir -p $(OUT_DIR)
+	python3 translator.py $(MODULE)
 
 $(INTFIMPL_AST): src/$(MODULE)-types-decl.hh
 	$(CreateAst) -o $@ -DMOZART_GENERATOR $<
@@ -47,7 +49,7 @@ $(BUILTINS_AST): src/$(MODULE).hh
 
 $(INTFIMPL_RESULT): $(INTFIMPL_AST)
 	$(Generator) intfimpl $< $(OUT_DIR)
-	touch $@
+	echo 1 > $@
 
 $(BUILTINS_RESULT): $(BUILTINS_AST)
 	$(Generator) builtins $< $(OUT_DIR) $(MODULE)builtins
@@ -64,7 +66,9 @@ ESSENTIAL_OZ = c-files/$(MODULE)_test.oz \
                $(MOZART_LIB_DIR)/sys/Property.oz \
                $(MOZART_LIB_DIR)/sys/System.oz \
                $(MOZART_LIB_DIR)/dp/URL.oz \
-               $(MOZART_LIB_DIR)/support/DefaultURL.oz
+               $(MOZART_LIB_DIR)/support/DefaultURL.oz \
+               $(MOZART_LIB_DIR)/sp/Error.oz \
+               $(MOZART_LIB_DIR)/sp/ErrorFormatters.oz
 LINKER = $(OUT_DIR)linker
 TEST_RESULT = src/$(MODULE)-test
 
@@ -75,8 +79,8 @@ $(BASE_ENV).cc $(BASE_ENV_TXT): $(TRANSLATION_RESULT)
             $(MOZART_LIB_DIR)/base/Base.oz $(MOZART_LIB_DIR)/boot/BootBase.oz
 
 define EssentialOzTemplate =
-OZ_RESULT += $$(OUTDIR)$$(notdir $(1)).o
-$$(OUTDIR)$$(notdir $(1)).cc: $(1) $$(BASE_ENV_TXT)
+OZ_RESULT += $$(OUT_DIR)$$(notdir $(1)).o
+$$(OUT_DIR)$$(notdir $(1)).cc: $(1) $$(BASE_ENV_TXT)
 	$$(OZBC) $$(OZBCFLAGS) -o $$@ $$<
 endef
 $(foreach oz, $(ESSENTIAL_OZ), $(eval $(call EssentialOzTemplate, $(oz))))
