@@ -2,6 +2,7 @@ functor
 
 import
     Cairo at 'x-oz://boot/cairo.ozf'
+    System
 
 define
     Pi = 3.141592653589793
@@ -10,11 +11,13 @@ define
     Yc = 128.0
     Radius = 100.0
     Angle1 = 45.0 * (Pi / 180.0)
-    Angle2 = 45.0 * (Pi / 180.0)
+    Angle2 = 180.0 * (Pi / 180.0)
 
     Surface = {Cairo.imageSurfaceCreate argb32 256 256}
+
     Cr = {Cairo.create Surface}
 
+    {Cairo.setSourceRgba Cr 0.0 0.0 0.0 1.0}
     {Cairo.setLineWidth Cr 10.0}
     {Cairo.arc Cr Xc Yc Radius Angle1 Angle2}
     {Cairo.stroke Cr}
@@ -23,7 +26,7 @@ define
     {Cairo.setSourceRgba Cr 1.0 0.2 0.2 0.6}
     {Cairo.setLineWidth Cr 6.0}
 
-    {Cairo.arc Cr Xc Yc 10.0 0.0 2*Pi}
+    {Cairo.arc Cr Xc Yc 10.0 0.0 2.0*Pi}
     {Cairo.fill Cr}
 
     {Cairo.arc Cr Xc Yc Radius Angle1 Angle1}
@@ -32,8 +35,9 @@ define
     {Cairo.lineTo Cr Xc Yc}
     {Cairo.stroke Cr}
 
-    {Cairo.surfaceWriteToPng Surface "/tmp/result.png"}
-    {Cairo.surfaceDestroy Surface}
+    _ = {Cairo.surfaceWriteToPng Surface "/tmp/result.png"}
+
     {Cairo.destroy Cr}
+    {Cairo.surfaceDestroy Surface}
 end
 
