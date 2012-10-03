@@ -179,7 +179,7 @@ def write_enum_builder(cc_formatter, enum_decl):
             }
         }
 
-        static void unbuild(VM vm, RichNode oz, %(s)s cc) {
+        static void unbuild(VM vm, RichNode oz, %(s)s& cc) {
             static const std::unordered_map<std::basic_string<nchar>, %(s)s> map = {
     """ % {'s': enum_name})
 
