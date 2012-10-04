@@ -2,6 +2,7 @@ functor
 
 import
     Cairo at 'x-oz://boot/cairo.ozf'
+    CairoScript at 'x-oz://boot/cairoScript.ozf'
     System
 
 define
@@ -13,7 +14,10 @@ define
     Angle1 = 45.0 * (Pi / 180.0)
     Angle2 = 180.0 * (Pi / 180.0)
 
-    Surface = {Cairo.imageSurfaceCreate argb32 256 256}
+    %Surface = {Cairo.imageSurfaceCreate argb32 256 256}
+    Script = {CairoScript.create "/tmp/script.txt"}
+    {CairoScript.setMode Script ascii}
+    Surface = {CairoScript.surfaceCreate Script colorAlpha 256.0 256.0}
 
     Cr = {Cairo.create Surface}
 
@@ -35,9 +39,10 @@ define
     {Cairo.lineTo Cr Xc Yc}
     {Cairo.stroke Cr}
 
-    _ = {Cairo.surfaceWriteToPng Surface "/tmp/result.png"}
+    %_ = {Cairo.surfaceWriteToPng Surface "/tmp/result.png"}
 
     {Cairo.destroy Cr}
     {Cairo.surfaceDestroy Surface}
+    {Cairo.deviceDestroy Script}
 end
 
