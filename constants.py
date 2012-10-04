@@ -12,6 +12,7 @@ BLACKLISTED = [re.compile(p) for p in [
     'cairo_(?:surface|device)_observer_print$',
     'cairo_surface_write_to_png_stream$',
     'cairo_raster_source_pattern_[gs]et_(?:acquire|snapshot|copy|finish)$',
+    'cairo_script_create_for_stream$',
     # ^ TODO: restore these functions (need callback support).
     'cairo_surface_[gs]et_mime_data$',
     'cairo_pattern_create_raster_source$',
@@ -21,7 +22,11 @@ BLACKLISTED = [re.compile(p) for p in [
     # ^ TODO: needs to protect the data with this function!
 ]]
 
-SPECIAL_INOUTS = [(re.compile(p), i) for p, i in {
+HEADER_WHITELIST = [re.compile(p) for p in [
+    '/usr/include/cairo/'
+]]
+
+SPECIAL_ARGUMENTS = [(re.compile(p), i) for p, i in {
     'cairo_(?:font_face_|scaled_font_|device_|surface_|pattern_)?get_user_data$':
         {'return': 'NodeOut'},
     'cairo_(?:font_face_|scaled_font_|device_|surface_|pattern_)?set_user_data$':
@@ -87,7 +92,7 @@ FUNCTION_POST_TEARDOWN = {
     """ % (cc_name_of('clusters'), cc_name_of('glyphs')),
 }
 
-SPECIAL_INOUTS_FOR_TYPES = {
+SPECIAL_ARGUMENTS_FOR_TYPES = {
     'cairo_destroy_func_t': ('NodeDeleter', 0),
     'cairo_user_data_key_t const *': 'AddressIn',
 }

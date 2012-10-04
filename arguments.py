@@ -2,7 +2,7 @@ from common import cc_name_of, oz_in_name_of, oz_out_name_of, unique_str
 from fake_type import IntType
 from to_cc import to_cc
 
-class StatementsCreator:
+class Argument:
     def _make_prefix(self, name):
         return 'auto ' + name if self._with_declaration else name
 
@@ -34,7 +34,7 @@ class StatementsCreator:
         return self.copy_as_type(type(self))
 
     def copy_as_type(self, new_type):
-        assert issubclass(new_type, StatementsCreator)
+        assert issubclass(new_type, Argument)
         new_copy = new_type()
         new_copy._type = self._type
         new_copy._name = self._name
@@ -62,7 +62,7 @@ class StatementsCreator:
 #-------------------------------------------------------------------------------
 # "Out" type.
 
-class OutStatementsCreator(StatementsCreator):
+class OutArgument(Argument):
     @staticmethod
     def get_oz_inout():
         return 'Out'
@@ -73,7 +73,7 @@ class OutStatementsCreator(StatementsCreator):
 #-------------------------------------------------------------------------------
 # "In" type.
 
-class InStatementsCreator(StatementsCreator):
+class InArgument(Argument):
     @staticmethod
     def get_oz_inout():
         return 'In'
@@ -86,13 +86,13 @@ class InStatementsCreator(StatementsCreator):
 #-------------------------------------------------------------------------------
 # "InOut" type.
 
-class InOutStatementsCreator(OutStatementsCreator):
+class InOutArgument(OutArgument):
     @staticmethod
     def get_oz_inout():
         return 'InOut'
 
     def pre(self, formatter):
-        in_creator = InStatementsCreator()
+        in_creator = InArgument()
         in_creator._type = self._type.get_pointee()
         in_creator._name = unique_str()
         in_creator._with_declaration = True
@@ -105,33 +105,33 @@ class InOutStatementsCreator(OutStatementsCreator):
 #-------------------------------------------------------------------------------
 # 'NodeOut' type
 
-class NodeOutStatementsCreator(OutStatementsCreator):
+class NodeOutArgument(OutArgument):
     def post(self, formatter):
-        formatter.write(self.oz_out_prefix + ' = unwrapNode(*(' + self.cc_name + '));')
+        formatter.write(self.oz_out_prefix + ' = WrappedNode::get(vm, *(' + self.cc_name + '));')
 
 #-------------------------------------------------------------------------------
 # 'NodeIn' type
 
-class NodeInStatementsCreator(InStatementsCreator):
+class NodeInArgument(InArgument):
     def pre(self, formatter):
-        formatter.write(self.cc_prefix + ' = wrapNode(vm, ' + self.oz_in_name + ');')
+        formatter.write(self.cc_prefix + ' = WrappedNode::create(vm, ' + self.oz_in_name + ');')
 
 #-------------------------------------------------------------------------------
 # 'NodeDeleter' type
 
-class NodeDeleterStatementsCreator(StatementsCreator):
+class NodeDeleterArgument(Argument):
     def pre(self, formatter):
         args = self._type.get_canonical().get_pointee().argument_types()
         lambda_args = ', '.join(to_cc(subtype, name='x_lambda_'+str(i))
                                 for i, subtype in enumerate(args))
         formatter.write("""
-            %s = [](%s) { deleteWrappedNode(x_lambda_%s); };
+            %s = [](%s) { WrappedNode::destroy(x_lambda_%s); };
         """ % (self.cc_prefix, lambda_args, self._context))
 
 #-------------------------------------------------------------------------------
 # 'AddressIn' type
 
-class AddressInStatementsCreator(InStatementsCreator):
+class AddressInArgument(InArgument):
     def pre(self, formatter):
         formatter.write("""
             %s = reinterpret_cast<%s>(IntegerValue(%s).intValue(vm));
@@ -140,21 +140,21 @@ class AddressInStatementsCreator(InStatementsCreator):
 #-------------------------------------------------------------------------------
 # 'Skip' type
 
-class SkipStatementsCreator(StatementsCreator):
+class SkipArgument(Argument):
     def pre(self, formatter):
         pass
 
 #-------------------------------------------------------------------------------
 # 'Constant' type
 
-class ConstantStatementsCreator(StatementsCreator):
+class ConstantArgument(Argument):
     def pre(self, formatter):
         formatter.write(self.cc_prefix + ' = ' + self._context + ';')
 
 #-------------------------------------------------------------------------------
 # 'ListIn' type
 
-class ListInStatementsCreator(InStatementsCreator):
+class ListInArgument(InArgument):
     def pre(self, formatter):
         formatter.write("""
             std::vector<std::remove_cv<%(t)s>::type> %(u)s;
@@ -176,7 +176,7 @@ class ListInStatementsCreator(InStatementsCreator):
 #-------------------------------------------------------------------------------
 # 'ListOut' type
 
-class ListOutStatementsCreator(OutStatementsCreator):
+class ListOutArgument(OutArgument):
     def __init__(self):
         super().__init__()
         self._cc_array_length_name = unique_str()
@@ -203,7 +203,7 @@ class ListOutStatementsCreator(OutStatementsCreator):
 #-------------------------------------------------------------------------------
 # 'PointerIn' type
 
-class PointerInStatementsCreator(InStatementsCreator):
+class PointerInArgument(InArgument):
     def pre(self, formatter):
         formatter.write("""
             std::remove_cv<%(t)s>::type %(u)s;

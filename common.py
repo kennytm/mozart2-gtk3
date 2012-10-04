@@ -1,13 +1,22 @@
 import re
 from clang.cindex import CursorKind, TypeKind, Cursor
+from collections import defaultdict
 
 C_FILES = 'c-files'
 C_EXT = '.c'
 SRC = 'src'
 CC_EXT = '.cc'
 HH_EXT = '.hh'
+OUT_EXT = '.out'
+
 TYPES_HH_EXT = '-types.hh'
 TYPES_DECL_HH_EXT = '-types-decl.hh'
+MODULES_HH_EXT = '-modules.hh'
+BUILDERS_HH_EXT = '-builders.hh'
+BUILTINS_HH_EXT = 'builtins.hh'
+BUILTINS_CC_EXT = 'builtins.cc'
+
+#-------------------------------------------------------------------------------
 
 INTEGER_KINDS = {
     TypeKind.INT, TypeKind.CHAR_U, TypeKind.UCHAR, TypeKind.CHAR16,
@@ -30,8 +39,9 @@ def unique_str():
     _unique_str_counter += 1
     return '_x_' + str(_unique_str_counter)
 
+camelsplitrx = re.compile('[-_]')
 def camelize(s):
-    arr = s.split('_')
+    arr = camelsplitrx.split(s)
     return arr[0].lower() + ''.join(p.capitalize() for p in arr[1:])
 
 def strip_prefix_and_camelize(s):
@@ -76,7 +86,7 @@ def strip_common_prefix_and_camelize(lst):
         if c == '_':
             strip_start = i+1
 
-    return [camelize(s[strip_start:]) for s in lst]
+    return (camelize(s[strip_start:]) for s in lst)
 
 #-------------------------------------------------------------------------------
 
@@ -100,8 +110,6 @@ def is_primitive_type(typ):
 
 #-------------------------------------------------------------------------------
 
-rx = re.compile('[^a-zA-Z0-9_]|_(?=_)')
-
 def name_of(node):
     spelling = node.spelling.decode('utf-8')
     if spelling:
@@ -112,6 +120,9 @@ def name_of(node):
         return name_of(typedef_node)
     else:
         return ''
+
+def is_concrete(struct_decl):
+    return struct_decl.is_definition()
 
 #-------------------------------------------------------------------------------
 
@@ -125,4 +136,16 @@ def oz_out_name_of(name):
     return '_x_out_' + name
 
 CC_NAME_OF_RETURN = cc_name_of('return')
+
+#-------------------------------------------------------------------------------
+
+def group_by(iterable, keyfunc):
+    """
+    Group the content of an iterable by some key. Returns a dictionary of lists
+    of these objects.
+    """
+    res = defaultdict(list)
+    for obj in iterable:
+        res[keyfunc(obj)].append(obj)
+    return res
 

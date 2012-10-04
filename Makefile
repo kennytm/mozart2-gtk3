@@ -28,7 +28,8 @@ all: lib test
 
 PYTHON_FILES = $(wildcard *.py)
 TRANSLATION_RESULT = src/$(MODULE).cc src/$(MODULE).hh \
-                     src/$(MODULE)-types-decl.hh src/$(MODULE)-types.hh
+                     src/$(MODULE)-types-decl.hh src/$(MODULE)-types.hh \
+		     src/$(MODULE)-builders.hh
 BUILTINS_AST = src/$(MODULE).astbi
 INTFIMPL_AST = src/$(MODULE).ast
 BUILTINS_RESULT = $(OUT_DIR)$(MODULE)builtins.cc $(OUT_DIR)$(MODULE)builtins.hh
@@ -38,7 +39,6 @@ CC_RESULT = src/$(MODULE).o
 lib: $(CC_RESULT)
 
 $(TRANSLATION_RESULT): $(PYTHON_FILES)
-	mkdir -p $(OUT_DIR)
 	python3 translator.py $(MODULE)
 
 $(INTFIMPL_AST): src/$(MODULE)-types-decl.hh

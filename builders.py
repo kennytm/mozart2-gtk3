@@ -1,327 +1,260 @@
-from common import *
-from constants import *
-from fixers import *
+from os.path import join
 from itertools import product
 from collections import OrderedDict
+from clang.cindex import CursorKind
+from common import *
+from fixers import FieldInfo, fixup_fields
 from fake_type import PointerOf
 from to_cc import to_cc
-import creators
+from writer import Writer
 
 #-------------------------------------------------------------------------------
 
-def write_common_builders_pre(cc):
-    for int_type in ['char', 'signed char', 'unsigned char', 'short',
-                     'unsigned short', 'int', 'unsigned', 'long',
-                     'unsigned long', 'long long', 'unsigned long long']:
-        cc.write("""
-            static void unbuild(VM vm, RichNode oz, %(s)s& cc) {
-                cc = static_cast<%(s)s>(IntegerValue(oz).intValue(vm));
-            }
-        """ % {'s': int_type})
-
-    for float_type in ['float', 'double', 'long double']:
-        cc.write("""
-            static void unbuild(VM vm, RichNode oz, %(s)s& cc) {
-                cc = static_cast<%(s)s>(FloatValue(oz).floatValue(vm));
-            }
-        """ % {'s': float_type})
-
-    cc.write("""
-        static void unbuild(VM vm, RichNode oz, bool& cc) {
-            cc = BooleanValue(oz).boolValue(vm);
-        }
-
-        static void unbuild(VM vm, RichNode oz, const char*& cc) {
-            std::basic_stringstream<nchar> buffer;
-            VirtualString(oz).toString(vm, buffer);
-            auto str = buffer.str();
-            auto utf = toUTF<char>(makeLString(str.c_str(), str.length()));
-            auto lstring = newLString(vm, utf);
-            cc = lstring.string;
-        }
-
-        template <typename It>
-        static UnstableNode buildDynamicList(VM vm, It begin, It end);
-
-        template <typename T>
-        static auto build(VM vm, T value)
-            -> typename std::enable_if<(std::is_integral<T>::value && std::is_signed<T>::value && sizeof(T) <= sizeof(nativeint)), UnstableNode>::type
-        {
-            nativeint extended = value;
-            return ::mozart::build(vm, extended);
-        }
-
-        template <typename T>
-        static auto build(VM vm, T value)
-            -> typename std::enable_if<(std::is_integral<T>::value && std::is_unsigned<T>::value && sizeof(T) <= sizeof(size_t)), UnstableNode>::type
-        {
-            size_t extended = value;
-            return ::mozart::build(vm, extended);
-        }
-
-        static void* wrapNode(VM vm, RichNode node) {
-            return new std::pair<ProtectedNode, VM>(ozProtect(vm, node), vm);
-        }
-
-        static UnstableNode unwrapNode(void* data) {
-            auto pair = static_cast<std::pair<ProtectedNode, VM>*>(data);
-            if (pair != nullptr) {
-                return UnstableNode(pair->second, *pair->first);
-            } else {
-                return build(pair->second, unit);
-            }
-        }
-
-        static void deleteWrappedNode(void* data) {
-            if (data != nullptr) {
-                auto pair = static_cast<std::pair<ProtectedNode, VM>*>(data);
-                ozUnprotect(pair->second, pair->first);
-                delete pair;
-            }
-        }
-    """)
-
-def write_common_builders_post(cc):
-    cc.write("""
-        template <typename T>
-        static auto build(VM vm, T* ptr)
-            -> typename std::enable_if<!std::is_fundamental<T>::value, UnstableNode>::type
-        {
-            return build(vm, *ptr);
-        }
-
-        template <typename It>
-        static UnstableNode buildDynamicList(VM vm, It begin, It end) {
-            OzListBuilder listBuilder (vm);
-            while (begin != end) {
-                listBuilder.push_back(vm, build(vm, *begin++));
-            }
-            return listBuilder.get(vm);
-        }
-    """)
-
-#-------------------------------------------------------------------------------
-
-def create_field_info_pair(field):
+def _create_field_info_pair(field):
     field_name = name_of(field)
     atom = 'MOZART_STR("' + camelize(field_name) + '")'
     builder = 'build(vm, cc.' + field_name + ')'
     unbuilder = """
-    {
-        auto label = Atom::build(vm, %s);
-        auto field = Dottable(oz).dot(vm, label);
-        unbuild(vm, field, cc.%s);
-    }
-    """ % (atom, field_name)
+        {{
+            auto label = Atom::build(vm, {0});
+            auto field = Dottable(oz).dot(vm, label);
+            unbuild(vm, field, cc.{1});
+        }}
+    """.format(atom, field_name)
 
     return (field_name, FieldInfo(field, atom, builder, unbuilder))
 
-def write_concrete_struct_builder(cc_formatter, struct_decl):
-    struct_name = name_of(struct_decl)
-    field_names = map(name_of, struct_decl.get_children())
-    field_objects = dict(map(create_field_info_pair, struct_decl.get_children()))
 
-    fixup_fields(field_objects)
+class BuildersWriter(Writer):
+    def __init__(self, basename, constants):
+        super().__init__(join(SRC, basename + BUILDERS_HH_EXT))
+        self._basename = basename
+        self._special_types = constants.SPECIAL_TYPES
 
-    (_, atoms, builders, unbuilders) = zip(*field_objects.values())
+    def write_prolog(self):
+        super().write_prolog()
 
-    cc_formatter.write("""
-        static UnstableNode build(VM vm, const %(s)s& cc) {
-            return buildRecord(vm,
-                buildArity(vm, MOZART_STR("%(ss)s"), %(f)s),
-                %(b)s
-            );
-        }
+        self.write('''
+            #include <type_traits>
+            #include <unordered_map>
+            #include <mozart.hh>
+            #include "''' + self._basename + TYPES_DECL_HH_EXT + '''"
 
-        static void unbuild(VM vm, RichNode oz, %(s)s& cc) {
-            %(x)s
-        }
-    """  % {
-        'ss': strip_prefix_and_camelize(struct_name),
-        's': struct_name,
-        'f': ', '.join(atoms),
-        'b': ', '.join(builders),
-        'x': '\n'.join(unbuilders)
-    })
+            namespace m2g3 {
+                using namespace mozart;
 
-def write_abstract_struct_builder(cc_formatter, struct_decl):
-    cc_formatter.write("""
-        static UnstableNode build(VM vm, %(s)s* cc) {
-            return D_%(s)s::build(vm, cc);
-        }
+                template <typename T>
+                static inline constexpr bool is_integral_not_bool() {
+                    return std::is_integral<T>::value && !std::is_same<typename std::decay<T>::type, bool>::value;
+                }
 
-        static void unbuild(VM vm, RichNode node, %(s)s*& cc) {
-            cc = node.as<D_%(s)s>().value();
-        }
+                class WrappedNode {
+                    VM _vm;
+                    ProtectedNode _node;
 
-        static void unbuild(VM vm, RichNode node, const %(s)s*& cc) {
-            cc = node.as<D_%(s)s>().value();
-        }
-    """ % {'s': name_of(struct_decl)})
+                    WrappedNode(VM vm, RichNode node) : _vm(vm), _node(ozProtect(vm, node)) {}
+                    ~WrappedNode() { ozUnprotect(_vm, _node); }
 
-#-------------------------------------------------------------------------------
+                public:
+                    static void* create(VM vm, RichNode node) {
+                        return new WrappedNode(vm, node);
+                    }
 
-def write_enum_builder(cc_formatter, enum_decl):
-    enum_name = name_of(enum_decl)
-    cc_enum_names = [name_of(enum) for enum in enum_decl.get_children()]
-    atom_names = strip_common_prefix_and_camelize(cc_enum_names)
+                    static void destroy(void* data) {
+                        delete static_cast<WrappedNode*>(data);
+                    }
 
-    cc_formatter.write("""
-        static UnstableNode build(VM vm, """ + enum_name + """ cc) {
-            switch (cc) {
-                default: return SmallInt::build(vm, cc);
-    """)
+                    static UnstableNode get(VM vm, void* data) {
+                        if (data != nullptr) {
+                            auto node = static_cast<WrappedNode*>(data);
+                            return UnstableNode(node->_vm, *node->_node);
+                        } else {
+                            return ::mozart::build(vm, ::mozart::unit);
+                        }
+                    }
+                };
 
-    for t in zip(cc_enum_names, atom_names):
-        cc_formatter.write('case %s: return Atom::build(vm, MOZART_STR("%s"));' % t)
+                template <typename T>
+                static auto unbuild(VM vm, RichNode oz, T& cc)
+                    -> typename std::enable_if<is_integral_not_bool<T>()>::type
+                {
+                    cc = static_cast<T>(IntegerValue(oz).intValue(vm));
+                }
 
-    cc_formatter.write("""
+                template <typename T>
+                static auto unbuild(VM vm, RichNode oz, T& cc)
+                    -> typename std::enable_if<std::is_floating_point<T>::value>::type
+                {
+                    cc = static_cast<T>(FloatValue(oz).floatValue(vm));
+                }
+
+                static void unbuild(VM vm, RichNode oz, bool& cc) {
+                    cc = BooleanValue(oz).boolValue(vm);
+                }
+
+                static void unbuild(VM vm, RichNode oz, const char*& cc) {
+                    std::basic_stringstream<nchar> buffer;
+                    VirtualString(oz).toString(vm, buffer);
+                    auto str = buffer.str();
+                    auto utf = toUTF<char>(makeLString(str.c_str(), str.length()));
+                    auto lstring = newLString(vm, utf);
+                    cc = lstring.string;
+                }
+
+                template <typename It>
+                static UnstableNode buildDynamicList(VM vm, It begin, It end);
+
+                template <typename T>
+                static auto build(VM vm, T value)
+                    -> typename std::enable_if<(is_integral_not_bool<T>() && std::is_signed<T>::value && sizeof(T) <= sizeof(nativeint)), UnstableNode>::type
+                {
+                    nativeint extended = value;
+                    return ::mozart::build(vm, extended);
+                }
+
+                template <typename T>
+                static auto build(VM vm, T value)
+                    -> typename std::enable_if<(is_integral_not_bool<T>() && std::is_unsigned<T>::value && sizeof(T) <= sizeof(size_t)), UnstableNode>::type
+                {
+                    size_t extended = value;
+                    return ::mozart::build(vm, extended);
+                }
+        ''')
+
+    def write_epilog(self):
+        self.write('''
+                template <typename T>
+                static auto build(VM vm, T* ptr)
+                    -> typename std::enable_if<!std::is_fundamental<T>::value, UnstableNode>::type
+                {
+                    return build(vm, *ptr);
+                }
+
+                template <typename It>
+                static UnstableNode buildDynamicList(VM vm, It begin, It end) {
+                    OzListBuilder listBuilder (vm);
+                    while (begin != end) {
+                        listBuilder.push_back(vm, build(vm, *begin++));
+                    }
+                    return listBuilder.get(vm);
+                }
             }
-        }
+        ''')
+        super().write_epilog()
 
-        static void unbuild(VM vm, RichNode oz, %(s)s& cc) {
-            static const std::unordered_map<std::basic_string<nchar>, %(s)s> map = {
-    """ % {'s': enum_name})
-
-    for t in zip(atom_names, cc_enum_names):
-        cc_formatter.write('{MOZART_STR("%s"), %s},' % t)
-
-    cc_formatter.write("""
-            };
-
-            auto str = vsToString<nchar>(vm, oz);
-            auto it = map.find(str);
-            if (it != map.end()) {
-                cc = it->second;
-            } else {
-                cc = static_cast<""" + enum_name +""">(IntegerValue(oz).intValue(vm));
-            }
-        }
-    """)
-
-#-------------------------------------------------------------------------------
-
-def write_builder(cc_formatter, type_node):
-    type_name = name_of(type_node)
-    try:
-        (builder_string, unbuilder_string) = SPECIAL_TYPES[type_name]
-
-    except KeyError:
-        if type_node.kind == CursorKind.STRUCT_DECL:
-            if is_concrete(type_node):
-                write_concrete_struct_builder(cc_formatter, type_node)
-            else:
-                write_abstract_struct_builder(cc_formatter, type_node)
-        elif type_node.kind == CursorKind.ENUM_DECL:
-            return write_enum_builder(cc_formatter, type_node)
-
-    else:
-        if builder_string:
-            cc_formatter.write("static UnstableNode build(VM vm, const %s& cc) {" % type_name)
-            cc_formatter.write(builder_string)
-            cc_formatter.write("}")
-        if unbuilder_string:
-            cc_formatter.write("static void unbuild(VM vm, RichNode oz, %s& cc) {" % type_name)
-            cc_formatter.write(unbuilder_string)
-            cc_formatter.write("}")
-
-#-------------------------------------------------------------------------------
-
-def get_statement_creators(func_cursor, c_func_name):
-    for regex, special_inouts in SPECIAL_INOUTS:
-        if regex.match(c_func_name):
-            inouts = special_inouts
-            break
-    else:
-        inouts = {}
-
-    def decode_inout(arg_name, default, typ):
-        inout_tuple = default
+    def write_type(self, type_node):
+        """
+        Write the builder and unbuilder representing the clang Node.
+        """
+        type_name = name_of(type_node)
         try:
-            inout_tuple = inouts[arg_name]
+            (builder_string, unbuilder_string) = self._special_types[type_name]
+
         except KeyError:
-            type_name = to_cc(typ)
-            inout_tuple = SPECIAL_INOUTS_FOR_TYPES.get(type_name, default)
+            if type_node.kind == CursorKind.STRUCT_DECL:
+                if is_concrete(type_node):
+                    self._write_concrete_struct(type_node)
+                else:
+                    self._write_abstract_struct(type_node)
+            elif type_node.kind == CursorKind.ENUM_DECL:
+                self._write_enum(type_node)
 
-        if isinstance(inout_tuple, str):
-            inout = inout_tuple
-            context = None
         else:
-            (inout, context) = inout_tuple
+            if builder_string:
+                self.write("""
+                    static UnstableNode build(VM vm, const {0}& cc) {{
+                        {1}
+                    }}
+                """.format(type_name, builder_string))
+            if unbuilder_string:
+                self.write("""
+                    static void unbuild(VM vm, RichNode oz, {0}& cc) {{
+                        {1}
+                    }}
+                """.format(type_name, unbuilder_string))
 
-        creator = getattr(creators, inout + 'StatementsCreator')()
-        creator._context = context
-        creator._name = arg_name
-        creator._type = typ
-        return creator
+    def _write_concrete_struct(self, struct_decl):
+        struct_name = name_of(struct_decl)
+        field_names = map(name_of, struct_decl.get_children())
+        field_objects = dict(map(_create_field_info_pair, struct_decl.get_children()))
 
-    for arg in func_cursor.get_children():
-        if arg.kind != CursorKind.PARM_DECL:
-            continue
+        fixup_fields(field_objects)
 
-        arg_name = name_of(arg)
-        yield decode_inout(arg_name, 'In', arg.type)
+        (_, atoms, builders, unbuilders) = zip(*field_objects.values())
 
+        self.write("""
+            static UnstableNode build(VM vm, const {s}& cc) {{
+                return buildRecord(vm,
+                    buildArity(vm, MOZART_STR("{ss}"), {f}),
+                    {b}
+                );
+            }}
+            static void unbuild(VM vm, RichNode oz, {s}& cc) {{
+                {x}
+            }}
 
-    return_type = func_cursor.result_type.get_canonical()
-    if return_type.kind != TypeKind.VOID:
-        yield decode_inout('return', 'Out', PointerOf(return_type))
+        """.format(
+            s=struct_name,
+            ss=strip_prefix_and_camelize(struct_name),
+            f=', '.join(atoms),
+            b=', '.join(builders),
+            x=''.join(unbuilders)
+        ))
 
+    def _write_abstract_struct(self, struct_decl):
+        self.write("""
+            static UnstableNode build(VM vm, {0}* cc) {{
+                return D_{0}::build(vm, cc);
+            }}
+            static void unbuild(VM vm, RichNode node, {0}*& cc) {{
+                cc = node.as<D_{0}>().value();
+            }}
+            static void unbuild(VM vm, RichNode node, const {0}*& cc) {{
+                cc = node.as<D_{0}>().value();
+            }}
 
-def get_cc_function_definition(func_cursor, c_func_name):
-    pre_fixup_creators = get_statement_creators(func_cursor, c_func_name)
-    pre_fixup_creators_dict = OrderedDict((c._name, c) for c in pre_fixup_creators)
-    fixup_args(pre_fixup_creators_dict)
-    return list(pre_fixup_creators_dict.values())
+        """.format(name_of(struct_decl)))
 
-def get_cc_arg_proto(creators, c_func_name):
-    try:
-        return SPECIAL_FUNCTIONS[c_func_name][0]
-    except KeyError:
-        pass
+    def _write_enum(self, enum_decl):
+        enum_name = name_of(enum_decl)
+        cc_enum_names = [name_of(enum) for enum in enum_decl.get_children()]
+        atom_names = list(strip_common_prefix_and_camelize(cc_enum_names))
 
-    arg_proto = []
-    for creator in creators:
-        inout = creator.get_oz_inout()
-        if inout in {'In', 'InOut'}:
-            arg_proto.append(', In ')
-            arg_proto.append(creator.oz_in_name)
-        if inout in {'Out', 'InOut'}:
-            arg_proto.append(', Out ')
-            arg_proto.append(creator.oz_out_name)
-    return ''.join(arg_proto)
+        # {{
 
-def write_cc_function_definition(cc_formatter, creators, c_func_name):
-    try:
-        cc_formatter.write(SPECIAL_FUNCTIONS[c_func_name][1])
-        return
-    except KeyError:
-        pass
+        self.write("""
+            static UnstableNode build(VM vm, """ + enum_name + """ cc) {
+                switch (cc) {
+                    default: return SmallInt::build(vm, cc);
+        """)
 
-    cc_formatter.write(FUNCTION_PRE_SETUP.get(c_func_name, ''))
+        for t in zip(cc_enum_names, atom_names):
+            self.write('case {0}: return Atom::build(vm, MOZART_STR("{1}"));'.format(*t))
 
-    for creator in creators:
-        creator._with_declaration = True
-        creator.pre(cc_formatter)
+        self.write("""
+                }}
+            }}
 
-    cc_formatter.write(FUNCTION_POST_SETUP.get(c_func_name, ''))
+            static void unbuild(VM vm, RichNode oz, {0}& cc) {{
+                static const std::unordered_map<std::basic_string<nchar>, {0}> map = {{
+        """.format(enum_name))
 
-    call_args = (creator.cc_name for creator in creators if creator._name != 'return')
-    call_statement = c_func_name + '(' + ', '.join(call_args) + ');'
-    if any(creator._name == 'return' for creator in creators):
-        call_statement = '*' + CC_NAME_OF_RETURN + ' = ' + call_statement
-    cc_formatter.write(call_statement)
+        for t in zip(atom_names, cc_enum_names):
+            self.write('{{MOZART_STR("{0}"), {1}}},'.format(*t))
 
-    cc_formatter.write(FUNCTION_PRE_TEARDOWN.get(c_func_name, ''))
+        self.write("""
+                };
 
-    for creator in creators:
-        creator._with_declaration = False
-        creator.post(cc_formatter)
+                auto str = vsToString<nchar>(vm, oz);
+                auto it = map.find(str);
+                if (it != map.end()) {
+                    cc = it->second;
+                } else {
+                    cc = static_cast<""" + enum_name +""">(IntegerValue(oz).intValue(vm));
+                }
+            }
 
-    cc_formatter.write(FUNCTION_POST_TEARDOWN.get(c_func_name, ''))
+        """)
 
-
-__all__ = ['write_builder', 'write_common_builders_pre', 'write_common_builders_post',
-           'is_concrete', 'get_cc_function_definition', 'get_cc_arg_proto',
-           'write_cc_function_definition', 'FieldInfo']
+        # }}
 
