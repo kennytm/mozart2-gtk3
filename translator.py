@@ -50,7 +50,7 @@ def get_mod_name(cursor):
 
 
 def translate(basename):
-    constants = import_module('constants')
+    constants = import_module(basename)
     (types, functions) = collect_nodes(basename, constants)
     grouped_functions = group_by(functions, get_mod_name)
 
