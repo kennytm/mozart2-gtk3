@@ -64,7 +64,7 @@ def strip_prefix_and_camelize(s):
     else:
         return camelize(s[first_underscore+1:])
 
-
+prefix_underscore_rx = re.compile('^_+')
 def strip_common_prefix_and_camelize(lst):
     """
     Remove the common prefix of a list of strings, and change it to CamelCase,
@@ -76,6 +76,12 @@ def strip_common_prefix_and_camelize(lst):
         ['destOver', 'destAtop', 'difference']
 
     """
+
+    # Remove any prefix '_'.
+    lst = [prefix_underscore_rx.sub('', s) for s in lst]
+    if len(lst) == 1:
+        return [strip_prefix_and_camelize(lst[0])]
+
     min_str = min(lst)
     max_str = max(lst)
     strip_start = len(min_str)
@@ -121,8 +127,8 @@ def name_of(node):
     else:
         return ''
 
-def is_concrete(struct_decl):
-    return struct_decl.is_definition()
+def is_concrete(struct_decl, opaque_structs):
+    return struct_decl.is_definition() and name_of(struct_decl) not in opaque_structs
 
 #-------------------------------------------------------------------------------
 

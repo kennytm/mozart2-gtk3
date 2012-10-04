@@ -22,17 +22,25 @@ Config.set_compatibility_check(False)
 def collect_nodes(basename, constants):
     types = []
     functions = []
+    existing_names = set()
 
-    tu = TranslationUnit.from_source(join(C_FILES, basename + C_EXT))
+    clang_args = [arg.encode('utf-8') for arg in constants.PKG_CONFIG_RES]
+    include_paths = [arg[2:] for arg in constants.PKG_CONFIG_RES if arg[:2] == '-I']
+    tu_name = join(C_FILES, basename + C_EXT)
+
+    tu = TranslationUnit.from_source(tu_name, args=clang_args)
     for node in tu.cursor.get_children():
         name = name_of(node)
         if any(regex.match(name) for regex in constants.BLACKLISTED):
             continue
+        if name in existing_names:
+            continue
+        existing_names.add(name)
 
         source_file = node.location.file
         if source_file:
             source_filename = source_file.name.decode('utf-8')
-            if not any(regex.match(source_filename) for regex in constants.HEADER_WHITELIST):
+            if not any(source_filename.startswith(whitelist) for whitelist in constants.HEADER_WHITELIST):
                 continue
 
         kind = node.kind
@@ -51,6 +59,7 @@ def get_mod_name(cursor):
 
 def translate(basename):
     constants = import_module(basename)
+
     (types, functions) = collect_nodes(basename, constants)
     grouped_functions = group_by(functions, get_mod_name)
 
@@ -60,14 +69,15 @@ def translate(basename):
             DataTypeDeclWriter(basename) as dtd, DataTypeWriter(basename) as dt:
         for type_decl in types:
             bf.write_type(type_decl)
-            if type_decl.kind == CursorKind.STRUCT_DECL and not is_concrete(type_decl):
-                struct_name = name_of(type_decl)
-                dtd.write_datatype(struct_name)
-                dt.write_datatype(struct_name)
+            if type_decl.kind == CursorKind.STRUCT_DECL:
+                if not is_concrete(type_decl, constants.OPAQUE_STRUCTS):
+                    struct_name = name_of(type_decl)
+                    dtd.write_datatype(struct_name)
+                    dt.write_datatype(struct_name)
 
     with ModuleHeaderWriter(basename) as mh, ModuleWriter(basename) as m:
         for modname, functions in grouped_functions.items():
-            ozfunc_names = strip_common_prefix_and_camelize(list(map(name_of, functions)))
+            ozfunc_names = list(strip_common_prefix_and_camelize(map(name_of, functions)))
             with mh.write_module(modname):
                 for function, ozfunc_name in zip(functions, ozfunc_names):
                     ozfunc = OzFunction(function, ozfunc_name, constants)

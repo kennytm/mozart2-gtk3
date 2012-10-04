@@ -3,24 +3,29 @@ MOZART_DIR ?= $(MOZART_SRC_DIR)/build/debug
 BOOTCOMPILER_DIR ?= $(realpath ../mozart2-bootcompiler)
 MOZART_LIB_DIR ?= $(realpath ../mozart2-library)
 MODULE ?= cairo
+PACKAGES ?= $(MODULE)
 
 OUT_DIR = src/$(MODULE).out/
 BASE_ENV_TXT = $(OUT_DIR)baseenv.txt
 
+EXTRA_CFLAGS = $(shell pkg-config --cflags $(PACKAGES))
+EXTRA_LDFLAGS = $(shell pkg-config --libs $(PACKAGES))
+
 CreateAst = clang++ -std=c++11 -stdlib=libc++ -Wno-return-type \
-                    -I$(MOZART_DIR)/vm/main -emit-ast
+                    -I$(MOZART_DIR)/vm/main -emit-ast $(EXTRA_CFLAGS)
 Generator = $(MOZART_DIR)/generator/main/generator
 
 CXX = g++
 CXXFLAGS = -std=c++11 -I$(MOZART_DIR)/vm/main -I$(MOZART_DIR)/boostenv/main -g \
-           -I$(OUT_DIR) -Isrc
+           -I$(OUT_DIR) -Isrc $(EXTRA_CFLAGS)
 OZBC = java -jar $(BOOTCOMPILER_DIR)/target/scala-2.9.1/bootcompiler_2.9.1-2.0-SNAPSHOT-one-jar.jar
 OZBCFLAGS = -h boostenv.hh -h $(MODULE).hh -b $(BASE_ENV_TXT) \
             -m $(MOZART_DIR)/vm/main -m $(MOZART_DIR)/boostenv/main -m $(OUT_DIR)
 
 LDFLAGS = $(MOZART_DIR)/boostenv/main/libmozartvmboost.a \
           $(MOZART_DIR)/vm/main/libmozartvm.a \
-          -lcairo -lboost_system -lboost_filesystem -lboost_thread -pthread
+          -lboost_system -lboost_filesystem -lboost_thread -pthread \
+	  $(EXTRA_LDFLAGS)
 
 all: lib test
 

@@ -30,6 +30,7 @@ class BuildersWriter(Writer):
         super().__init__(join(SRC, basename + BUILDERS_HH_EXT))
         self._basename = basename
         self._special_types = constants.SPECIAL_TYPES
+        self._opaque_structs = constants.OPAQUE_STRUCTS
 
     def write_prolog(self):
         super().write_prolog()
@@ -152,7 +153,7 @@ class BuildersWriter(Writer):
 
         except KeyError:
             if type_node.kind == CursorKind.STRUCT_DECL:
-                if is_concrete(type_node):
+                if is_concrete(type_node, self._opaque_structs):
                     self._write_concrete_struct(type_node)
                 else:
                     self._write_abstract_struct(type_node)
@@ -178,7 +179,7 @@ class BuildersWriter(Writer):
         field_names = map(name_of, struct_decl.get_children())
         field_objects = dict(map(_create_field_info_pair, struct_decl.get_children()))
 
-        fixup_fields(field_objects)
+        fixup_fields(field_objects, self._opaque_structs)
 
         (_, atoms, builders, unbuilders) = zip(*field_objects.values())
 

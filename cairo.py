@@ -1,5 +1,8 @@
 import re
 from common import CC_NAME_OF_RETURN, cc_name_of, unique_str
+from pkg_config import pkg_config
+
+PKG_CONFIG_RES = pkg_config(['cairo'])
 
 BLACKLISTED = [re.compile(p) for p in [
     '__va_list_tag$',
@@ -22,9 +25,10 @@ BLACKLISTED = [re.compile(p) for p in [
     # ^ TODO: needs to protect the data with this function!
 ]]
 
-HEADER_WHITELIST = [re.compile(p) for p in [
-    '/usr/include/cairo/'
-]]
+HEADER_WHITELIST = [
+    '/usr/include/cairo/',
+    '/usr/include/glib'
+]
 
 SPECIAL_ARGUMENTS = [(re.compile(p), i) for p, i in {
     'cairo_(?:font_face_|scaled_font_|device_|surface_|pattern_)?get_user_data$':

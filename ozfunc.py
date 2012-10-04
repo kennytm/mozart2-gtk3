@@ -62,7 +62,8 @@ class OzFunction:
         except KeyError:
             pre_fixup_args = _get_arguments(function, c_func_name, constants)
             pre_fixup_args_odict = OrderedDict((c._name, c) for c in pre_fixup_args)
-            fixup_args(pre_fixup_args_odict)
+
+            fixup_args(pre_fixup_args_odict, constants.OPAQUE_STRUCTS)
 
             self._args = pre_fixup_args_odict.values()
             self._arg_proto = None

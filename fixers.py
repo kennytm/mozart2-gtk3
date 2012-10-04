@@ -34,7 +34,7 @@ def _check_is_array(obj_name, obj, objs, type_of_obj_retriever):
     return True
 
 
-def array_field_fixer(field_name, num_field_info, fields):
+def array_field_fixer(field_name, num_field_info, fields, opaque_structs):
     if not _check_is_array(field_name, num_field_info, fields, lambda info: info.field.type):
         return False
 
@@ -47,7 +47,7 @@ def array_field_fixer(field_name, num_field_info, fields):
 
     return True
 
-def array_in_arg_fixer(arg_name, argument, arguments):
+def array_in_arg_fixer(arg_name, argument, arguments, opaque_structs):
     if type(argument) != InArgument:
         return False
     if not _check_is_array(arg_name, argument, arguments, lambda c: c._type):
@@ -61,7 +61,7 @@ def array_in_arg_fixer(arg_name, argument, arguments):
 
     return True
 
-def array_out_arg_fixer(arg_name, argument, arguments):
+def array_out_arg_fixer(arg_name, argument, arguments, opaque_structs):
     if type(argument) != InArgument:
         return False
     if not _check_is_array_name(arg_name, arguments):
@@ -90,7 +90,7 @@ def array_out_arg_fixer(arg_name, argument, arguments):
 #
 ## Assume 'const structure*' is an in-argument taking an ordinary structure.
 
-def pointer_in_arg_fixer(arg_name, argument, arguments):
+def pointer_in_arg_fixer(arg_name, argument, arguments, opaque_structs):
     if type(argument) != InArgument:
         return False
 
@@ -102,7 +102,7 @@ def pointer_in_arg_fixer(arg_name, argument, arguments):
         return False
 
     struct = pointee.get_declaration()
-    if not is_concrete(struct):
+    if not is_concrete(struct, opaque_structs):
         return False
 
     arguments[arg_name] = argument.copy_as_type(PointerInArgument)
@@ -111,10 +111,10 @@ def pointer_in_arg_fixer(arg_name, argument, arguments):
 #-------------------------------------------------------------------------------
 
 def fixup(fixers):
-    def f(obj_dict):
+    def f(obj_dict, opaque_structs):
         while True:
             for fixer, (obj_name, obj) in product(fixers, list(obj_dict.items())):
-                if fixer(obj_name, obj, obj_dict):
+                if fixer(obj_name, obj, obj_dict, opaque_structs):
                     break   # loop from the beginning again.
             else:
                 break   # break the infinite loop, since there's nothing left to fix.
