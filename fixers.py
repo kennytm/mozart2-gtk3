@@ -1,3 +1,4 @@
+import re
 from common import INTEGER_KINDS, name_of, is_concrete
 from itertools import product
 from clang.cindex import TypeKind
@@ -10,35 +11,37 @@ FieldInfo = namedtuple('FieldInfo', ['field', 'atom', 'builder', 'unbuilder'])
 #
 ## Assume members of name 'num_???' with a pointer of name '???' forms an array.
 
+length_field_rx = re.compile('n(?:um)?_(.+)')
 def _check_is_array_name(obj_name, objs):
-    if not obj_name.startswith('num_'):
-        return False
-    array_obj_name = obj_name[4:]
+    m = length_field_rx.match(obj_name)
+    if m is None:
+        return None
+    array_obj_name = m.group(1)
     if array_obj_name not in objs:
-        return False
-    return True
+        return None
+    return array_obj_name
 
 
 def _check_is_array(obj_name, obj, objs, type_of_obj_retriever):
-    if not _check_is_array_name(obj_name, objs):
-        return False
+    array_obj_name = _check_is_array_name(obj_name, objs)
+    if array_obj_name is None:
+        return None
 
-    num_type = type_of_obj_retriever(obj)
-    array_type = type_of_obj_retriever(objs[obj_name[4:]])
+    num_type = type_of_obj_retriever(obj).get_canonical()
+    array_type = type_of_obj_retriever(objs[array_obj_name])
 
     if array_type.kind != TypeKind.POINTER:
-        return False
+        return None
     if num_type.kind not in INTEGER_KINDS:
-        return False
+        return None
 
-    return True
+    return array_obj_name
 
 
 def array_field_fixer(field_name, num_field_info, fields, opaque_structs):
-    if not _check_is_array(field_name, num_field_info, fields, lambda info: info.field.type):
+    array_field_name = _check_is_array(field_name, num_field_info, fields, lambda info: info.field.type)
+    if array_field_name is None:
         return False
-
-    array_field_name = field_name[4:]
 
     new_builder = 'buildDynamicList(vm, cc.{0}, cc.{0} + cc.{1})'.format(array_field_name, field_name)
 
@@ -50,10 +53,11 @@ def array_field_fixer(field_name, num_field_info, fields, opaque_structs):
 def array_in_arg_fixer(arg_name, argument, arguments, opaque_structs):
     if type(argument) != InArgument:
         return False
-    if not _check_is_array(arg_name, argument, arguments, lambda c: c._type):
+
+    array_arg_name = _check_is_array(arg_name, argument, arguments, lambda c: c._type)
+    if array_arg_name is None:
         return False
 
-    array_arg_name = arg_name[4:]
     array_argument = arguments[array_arg_name].copy_as_type(ListInArgument)
     array_argument._context = arg_name
     arguments[array_arg_name] = array_argument
@@ -64,10 +68,11 @@ def array_in_arg_fixer(arg_name, argument, arguments, opaque_structs):
 def array_out_arg_fixer(arg_name, argument, arguments, opaque_structs):
     if type(argument) != InArgument:
         return False
-    if not _check_is_array_name(arg_name, arguments):
+
+    array_name = _check_is_array_name(arg_name, arguments)
+    if array_name is None:
         return False
 
-    array_name = arg_name[4:]
     array_argument = arguments[array_name]
 
     if argument._type.kind != TypeKind.POINTER:
