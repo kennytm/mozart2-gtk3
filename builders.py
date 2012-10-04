@@ -218,7 +218,8 @@ class BuildersWriter(Writer):
 
     def _write_enum(self, enum_decl):
         enum_name = name_of(enum_decl)
-        cc_enum_names = [name_of(enum) for enum in enum_decl.get_children()]
+        enum_pairs = ((name_of(enum), enum.enum_value) for enum in enum_decl.get_children())
+        (cc_enum_names, enum_values) = zip(*enum_pairs)
         atom_names = list(strip_common_prefix_and_camelize(cc_enum_names))
 
         # {{
@@ -229,8 +230,13 @@ class BuildersWriter(Writer):
                     default: return SmallInt::build(vm, cc);
         """)
 
-        for t in zip(cc_enum_names, atom_names):
-            self.write('case {0}: return Atom::build(vm, MOZART_STR("{1}"));'.format(*t))
+        seen_values = set()
+        for value, cc_enum_name, atom_name in zip(enum_values, cc_enum_names, atom_names):
+            if value not in seen_values:
+                self.write("""
+                    case {0}: return Atom::build(vm, MOZART_STR("{1}"));
+                """.format(cc_enum_name, atom_name))
+                seen_values.add(value)
 
         self.write("""
                 }}
