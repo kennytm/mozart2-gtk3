@@ -202,5 +202,16 @@ SPECIAL_FUNCTIONS = {
         """),
 }
 
-OPAQUE_STRUCTS = set()
+FLAGS = [re.compile(p) for p in [
+    '_cairo_text_cluster_flags$',
+    'GHookFlagMask$',
+    r'G\w+Flags$',
+    'GFileTest$',
+    'GIOCondition$',
+    'GSignalMatchType$',
+]]
+
+OPAQUE_STRUCTS = {
+    '_GArray'
+}
 

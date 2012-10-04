@@ -25,12 +25,26 @@ def _create_field_info_pair(field):
     return (field_name, FieldInfo(field, atom, builder, unbuilder))
 
 
+def _flag_sort_key(triple):
+    value = triple[1]
+    is_neg = value < 0
+    if is_neg:
+        value = ~value
+    bin_rep = bin(value)[2:]
+    pop_count = sum(1 for c in bin_rep if c == '1')
+    if is_neg:
+        return (0, pop_count, ~value)
+    else:
+        return (1, -pop_count, value)
+
+
 class BuildersWriter(Writer):
     def __init__(self, basename, constants):
         super().__init__(join(SRC, basename + BUILDERS_HH_EXT))
         self._basename = basename
         self._special_types = constants.SPECIAL_TYPES
         self._opaque_structs = constants.OPAQUE_STRUCTS
+        self._flags = constants.FLAGS
 
     def write_prolog(self):
         super().write_prolog()
@@ -221,7 +235,12 @@ class BuildersWriter(Writer):
         enum_pairs = ((name_of(enum), enum.enum_value) for enum in enum_decl.get_children())
         (cc_enum_names, enum_values) = zip(*enum_pairs)
         atom_names = list(strip_common_prefix_and_camelize(cc_enum_names))
+        if any(regex.match(enum_name) for regex in self._flags):
+            self._write_flags(enum_name, cc_enum_names, enum_values, atom_names)
+        else:
+            self._write_real_enum(enum_name, cc_enum_names, enum_values, atom_names)
 
+    def _write_real_enum(self, enum_name, cc_enum_names, enum_values, atom_names):
         # {{
 
         self.write("""
@@ -264,4 +283,64 @@ class BuildersWriter(Writer):
         """)
 
         # }}
+
+    def _write_flags(self, enum_name, cc_enum_names, enum_values, atom_names):
+        # Sort the enums such that flags with most bits are processed first.
+        triples = zip(cc_enum_names, enum_values, atom_names)
+        triples = sorted(triples, key=_flag_sort_key)
+        (cc_enum_names, enum_values, atom_names) = zip(*triples)
+
+        self.write("""
+            static UnstableNode build(VM vm, {0} cc) {{
+                OzListBuilder builder (vm);
+                auto flags = static_cast<std::underlying_type<{0}>::type>(cc);
+        """.format(enum_name))
+
+        for cc_enum_name, atom_name in zip(cc_enum_names, atom_names):
+            self.write("""
+                if ((flags & {0}) == {0}) {{
+                    builder.push_front(vm, MOZART_STR("{1}"));
+                    flags &= ~{0};
+                }}
+            """.format(cc_enum_name, atom_name))
+
+        self.write("""
+                if (flags != 0) {{
+                    builder.push_front(vm, flags);
+                }}
+                return builder.get(vm);
+            }}
+
+            static void unbuild(VM vm, RichNode oz, {0}& cc) {{
+                static const std::unordered_map<std::basic_string<nchar>, std::underlying_type<{0}>::type> map = {{
+        """.format(enum_name))
+
+        for t in zip(atom_names, cc_enum_names):
+            self.write('{{MOZART_STR("{0}"), {1}}},'.format(*t))
+
+        self.write("""
+                }};
+
+                std::underlying_type<{0}>::type flags = 0;
+
+                ozListForEach(vm, oz, [vm, &flags](UnstableNode& node) {{
+                    auto str = vsToString<nchar>(vm, node);
+                    auto it = map.find(str);
+                    if (it != map.end()) {{
+                        flags |= it->second;
+                    }} else {{
+                        flags |= IntegerValue(node).intValue(vm);
+                    }}
+                }}, MOZART_STR("{0}"));
+
+                cc = static_cast<{0}>(flags);
+            }}
+        """.format(enum_name))
+
+
+
+
+
+
+
 
