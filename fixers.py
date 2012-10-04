@@ -3,7 +3,7 @@ from common import INTEGER_KINDS, name_of, is_concrete
 from itertools import product
 from clang.cindex import TypeKind
 from collections import namedtuple
-from arguments import *
+from arguments import In, ListIn, Skip, ListOut, PointerIn
 
 FieldInfo = namedtuple('FieldInfo', ['field', 'atom', 'builder', 'unbuilder'])
 
@@ -38,7 +38,7 @@ def _check_is_array(obj_name, obj, objs, type_of_obj_retriever):
     return array_obj_name
 
 
-def array_field_fixer(field_name, num_field_info, fields, opaque_structs):
+def array_field_fixer(field_name, num_field_info, fields, constants):
     array_field_name = _check_is_array(field_name, num_field_info, fields, lambda info: info.field.type)
     if array_field_name is None:
         return False
@@ -50,23 +50,23 @@ def array_field_fixer(field_name, num_field_info, fields, opaque_structs):
 
     return True
 
-def array_in_arg_fixer(arg_name, argument, arguments, opaque_structs):
-    if type(argument) != InArgument:
+def array_in_arg_fixer(arg_name, argument, arguments, constants):
+    if type(argument) != In:
         return False
 
     array_arg_name = _check_is_array(arg_name, argument, arguments, lambda c: c._type)
     if array_arg_name is None:
         return False
 
-    array_argument = arguments[array_arg_name].copy_as_type(ListInArgument)
+    array_argument = arguments[array_arg_name].copy_as_type(ListIn)
     array_argument._context = arg_name
     arguments[array_arg_name] = array_argument
-    arguments[arg_name] = argument.copy_as_type(SkipArgument)
+    arguments[arg_name] = argument.copy_as_type(Skip)
 
     return True
 
-def array_out_arg_fixer(arg_name, argument, arguments, opaque_structs):
-    if type(argument) != InArgument:
+def array_out_arg_fixer(arg_name, argument, arguments, constants):
+    if type(argument) != In:
         return False
 
     array_name = _check_is_array_name(arg_name, arguments)
@@ -84,10 +84,10 @@ def array_out_arg_fixer(arg_name, argument, arguments, opaque_structs):
     if array_argument._type.get_pointee().kind != TypeKind.POINTER:
         return False
 
-    array_argument = array_argument.copy_as_type(ListOutArgument)
+    array_argument = array_argument.copy_as_type(ListOut)
     array_argument._context = arg_name
     arguments[array_name] = array_argument
-    arguments[arg_name] = argument.copy_as_type(SkipArgument)
+    arguments[arg_name] = argument.copy_as_type(Skip)
 
     return True
 
@@ -95,8 +95,8 @@ def array_out_arg_fixer(arg_name, argument, arguments, opaque_structs):
 #
 ## Assume 'const structure*' is an in-argument taking an ordinary structure.
 
-def pointer_in_arg_fixer(arg_name, argument, arguments, opaque_structs):
-    if type(argument) != InArgument:
+def pointer_in_arg_fixer(arg_name, argument, arguments, constants):
+    if type(argument) != In:
         return False
 
     if argument._type.kind != TypeKind.POINTER:
@@ -107,19 +107,20 @@ def pointer_in_arg_fixer(arg_name, argument, arguments, opaque_structs):
         return False
 
     struct = pointee.get_declaration()
-    if not is_concrete(struct, opaque_structs):
+    if not (is_concrete(struct, constants.CONCRETE_STRUCTS) or
+            is_concrete(struct, constants.CONCRETE_OPAQUE_STRUCTS)):
         return False
 
-    arguments[arg_name] = argument.copy_as_type(PointerInArgument)
+    arguments[arg_name] = argument.copy_as_type(PointerIn)
     return True
 
 #-------------------------------------------------------------------------------
 
 def fixup(fixers):
-    def f(obj_dict, opaque_structs):
+    def f(obj_dict, constants):
         while True:
             for fixer, (obj_name, obj) in product(fixers, list(obj_dict.items())):
-                if fixer(obj_name, obj, obj_dict, opaque_structs):
+                if fixer(obj_name, obj, obj_dict, constants):
                     break   # loop from the beginning again.
             else:
                 break   # break the infinite loop, since there's nothing left to fix.

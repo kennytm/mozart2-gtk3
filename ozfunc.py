@@ -1,26 +1,30 @@
 from collections import OrderedDict
 from clang.cindex import TypeKind, CursorKind
-from common import name_of, CC_NAME_OF_RETURN, strip_prefix_and_camelize
+from common import *
 from fixers import fixup_args
 from fake_type import PointerOf
 from to_cc import to_cc
-import arguments
+from arguments import In, Out
 
 def _decode_argument(args_dict, arg_name, default, typ, constants):
-    arg_tuple = default
+    arg_tuple = None
     try:
         arg_tuple = args_dict[arg_name]
     except KeyError:
-        type_name = to_cc(typ)
-        arg_tuple = constants.SPECIAL_ARGUMENTS_FOR_TYPES.get(type_name, default)
+        if arg_name == 'return':
+            type_name = to_cc(typ.get_pointee())
+            arg_tuple = constants.SPECIAL_ARGUMENTS_FOR_RETURN_TYPES.get(type_name)
+        if arg_tuple is None:
+            type_name = to_cc(typ)
+            arg_tuple = constants.SPECIAL_ARGUMENTS_FOR_TYPES.get(type_name, default)
 
-    if isinstance(arg_tuple, str):
+    if isinstance(arg_tuple, type):
         inout = arg_tuple
         context = None
     else:
         (inout, context) = arg_tuple
 
-    arg = getattr(arguments, inout + 'Argument')()
+    arg = inout()
     arg._context = context
     arg._name = arg_name
     arg._type = typ
@@ -28,24 +32,20 @@ def _decode_argument(args_dict, arg_name, default, typ, constants):
 
 
 def _get_arguments(func_cursor, c_func_name, constants):
-    for regex, special_args_dict in constants.SPECIAL_ARGUMENTS:
-        if regex.match(c_func_name):
-            args_dict = special_args_dict
-            break
-    else:
-        args_dict = {}
+    args_dict = find_from_regex_map(constants.SPECIAL_ARGUMENTS, c_func_name, {})
 
     for arg in func_cursor.get_children():
         if arg.kind != CursorKind.PARM_DECL:
             continue
 
         arg_name = name_of(arg)
-        yield _decode_argument(args_dict, arg_name, 'In', arg.type, constants)
+        yield _decode_argument(args_dict, arg_name, In, arg.type, constants)
 
 
     return_type = func_cursor.result_type.get_canonical()
     if return_type.kind != TypeKind.VOID:
-        yield _decode_argument(args_dict, 'return', 'Out', PointerOf(return_type), constants)
+        yield _decode_argument(args_dict, 'return', Out, PointerOf(return_type), constants)
+
 
 
 class OzFunction:
@@ -63,16 +63,16 @@ class OzFunction:
             pre_fixup_args = _get_arguments(function, c_func_name, constants)
             pre_fixup_args_odict = OrderedDict((c._name, c) for c in pre_fixup_args)
 
-            fixup_args(pre_fixup_args_odict, constants.OPAQUE_STRUCTS)
+            fixup_args(pre_fixup_args_odict, constants)
 
             self._args = pre_fixup_args_odict.values()
             self._arg_proto = None
             self._func_def = None
 
-            self._pre_setup = constants.FUNCTION_PRE_SETUP.get(c_func_name, '')
-            self._post_setup = constants.FUNCTION_POST_SETUP.get(c_func_name, '')
-            self._pre_teardown = constants.FUNCTION_PRE_TEARDOWN.get(c_func_name, '')
-            self._post_teardown = constants.FUNCTION_POST_TEARDOWN.get(c_func_name, '')
+            self._pre_setup = find_from_regex_map(constants.FUNCTION_PRE_SETUP, c_func_name, '')
+            self._post_setup = find_from_regex_map(constants.FUNCTION_POST_SETUP, c_func_name, '')
+            self._pre_teardown = find_from_regex_map(constants.FUNCTION_PRE_TEARDOWN, c_func_name, '')
+            self._post_teardown = find_from_regex_map(constants.FUNCTION_POST_TEARDOWN, c_func_name, '')
 
     def get_arg_proto(self):
         if self._arg_proto is None:

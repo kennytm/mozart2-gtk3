@@ -14,13 +14,11 @@ def _create_field_info_pair(field):
     field_name = name_of(field)
     atom = 'MOZART_STR("' + camelize(field_name) + '")'
     builder = 'build(vm, cc.' + field_name + ')'
-    unbuilder = """
-        {{
-            auto label = Atom::build(vm, {0});
-            auto field = Dottable(oz).dot(vm, label);
-            unbuild(vm, field, cc.{1});
-        }}
-    """.format(atom, field_name)
+    unbuilder = """{
+        auto label = Atom::build(vm, """ + atom + """);
+        auto field = Dottable(oz).dot(vm, label);
+        unbuild(vm, field, cc.""" + field_name + """);
+    }"""
 
     return (field_name, FieldInfo(field, atom, builder, unbuilder))
 
@@ -42,8 +40,7 @@ class BuildersWriter(Writer):
     def __init__(self, basename, constants):
         super().__init__(join(SRC, basename + BUILDERS_HH_EXT))
         self._basename = basename
-        self._special_types = constants.SPECIAL_TYPES
-        self._opaque_structs = constants.OPAQUE_STRUCTS
+        self._constants = constants
         self._flags = constants.FLAGS
 
     def write_prolog(self):
@@ -62,6 +59,11 @@ class BuildersWriter(Writer):
                 static inline constexpr bool is_integral_not_bool() {
                     return std::is_integral<T>::value && !std::is_same<typename std::decay<T>::type, bool>::value;
                 }
+
+                template <typename T>
+                using CharTypeOf = typename std::conditional<sizeof(T)==sizeof(char), char,
+                                   typename std::conditional<sizeof(T)==sizeof(char16_t), char16_t,
+                                   typename std::conditional<sizeof(T)==sizeof(char32_t), char32_t, void>::type>::type>::type;
 
                 class WrappedNode {
                     VM _vm;
@@ -107,15 +109,6 @@ class BuildersWriter(Writer):
                     cc = BooleanValue(oz).boolValue(vm);
                 }
 
-                static void unbuild(VM vm, RichNode oz, const char*& cc) {
-                    std::basic_stringstream<nchar> buffer;
-                    VirtualString(oz).toString(vm, buffer);
-                    auto str = buffer.str();
-                    auto utf = toUTF<char>(makeLString(str.c_str(), str.length()));
-                    auto lstring = newLString(vm, utf);
-                    cc = lstring.string;
-                }
-
                 template <typename It>
                 static UnstableNode buildDynamicList(VM vm, It begin, It end);
 
@@ -134,6 +127,31 @@ class BuildersWriter(Writer):
                     size_t extended = value;
                     return ::mozart::build(vm, extended);
                 }
+
+                template <typename T>
+                static UnstableNode buildString(VM vm, const T* str) {
+                    auto src = makeLString(static_cast<const CharTypeOf<T>*>(str));
+                    auto utf = toUTF<nchar>(src);
+                    auto lstring = newLString(vm, utf);
+                    return String::build(vm, lstring);
+                }
+
+                template <typename T>
+                static void unbuildString(VM vm, RichNode oz, const T*& cc) {
+                    std::basic_stringstream<nchar> buffer;
+                    VirtualString(oz).toString(vm, buffer);
+                    auto str = buffer.str();
+                    auto utf = toUTF<CharTypeOf<T>>(makeLString(str.c_str(), str.length()));
+                    auto lstring = newLString(vm, utf);
+                    cc = static_cast<const T*>(lstring.string);
+                }
+
+                static UnstableNode build(VM vm, const char* cc) { return buildString(vm, cc); }
+                static UnstableNode build(VM vm, const char16_t* cc) { return buildString(vm, cc); }
+                static UnstableNode build(VM vm, const char32_t* cc) { return buildString(vm, cc); }
+                static void unbuild(VM vm, RichNode oz, const char*& cc) { unbuildString(vm, oz, cc); }
+                static void unbuild(VM vm, RichNode oz, const char16_t*& cc) { unbuildString(vm, oz, cc); }
+                static void unbuild(VM vm, RichNode oz, const char32_t*& cc) { unbuildString(vm, oz, cc); }
         ''')
 
     def write_epilog(self):
@@ -163,12 +181,14 @@ class BuildersWriter(Writer):
         """
         type_name = name_of(type_node)
         try:
-            (builder_string, unbuilder_string) = self._special_types[type_name]
+            (builder_string, unbuilder_string) = self._constants.SPECIAL_TYPES[type_name]
 
         except KeyError:
             if type_node.kind == CursorKind.STRUCT_DECL:
-                if is_concrete(type_node, self._opaque_structs):
+                if is_concrete(type_node, self._constants.CONCRETE_STRUCTS):
                     self._write_concrete_struct(type_node)
+                elif is_concrete(type_node, self._constants.CONCRETE_OPAQUE_STRUCTS):
+                    self._write_concrete_opaque_struct(type_node)
                 else:
                     self._write_abstract_struct(type_node)
             elif type_node.kind == CursorKind.ENUM_DECL:
@@ -176,24 +196,20 @@ class BuildersWriter(Writer):
 
         else:
             if builder_string:
-                self.write("""
-                    static UnstableNode build(VM vm, const {0}& cc) {{
-                        {1}
-                    }}
-                """.format(type_name, builder_string))
+                self.write('static UnstableNode build(VM vm, const ' + type_name + '& cc) {')
+                self.write(builder_string)
+                self.write('}')
             if unbuilder_string:
-                self.write("""
-                    static void unbuild(VM vm, RichNode oz, {0}& cc) {{
-                        {1}
-                    }}
-                """.format(type_name, unbuilder_string))
+                self.write('static void unbuild(VM vm, RichNode oz, ' + type_name + '& cc) {')
+                self.write(unbuilder_string)
+                self.write('}')
 
     def _write_concrete_struct(self, struct_decl):
         struct_name = name_of(struct_decl)
         field_names = map(name_of, struct_decl.get_children())
         field_objects = dict(map(_create_field_info_pair, struct_decl.get_children()))
 
-        fixup_fields(field_objects, self._opaque_structs)
+        fixup_fields(field_objects, self._constants)
 
         (_, atoms, builders, unbuilders) = zip(*field_objects.values())
 
@@ -215,6 +231,19 @@ class BuildersWriter(Writer):
             b=', '.join(builders),
             x=''.join(unbuilders)
         ))
+
+    def _write_concrete_opaque_struct(self, struct_decl):
+        self.write("""
+            static UnstableNode build(VM vm, const {0}& cc) {{
+                return D_{0}::build(vm, cc);
+            }}
+            static void unbuild(VM vm, RichNode node, {0}& cc) {{
+                cc = node.as<D_{0}>().value();
+            }}
+            static void unbuild(VM vm, RichNode node, const {0}*& cc) {{
+                cc = &(node.as<D_{0}>().value());
+            }}
+        """.format(name_of(struct_decl)))
 
     def _write_abstract_struct(self, struct_decl):
         self.write("""

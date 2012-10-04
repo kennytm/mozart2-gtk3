@@ -1,15 +1,21 @@
 import re
-from common import CC_NAME_OF_RETURN, cc_name_of, unique_str
+from common import *
 from pkg_config import pkg_config
+from arguments import *
 
 PKG_CONFIG_RES = pkg_config(['cairo'])
 
-BLACKLISTED = [re.compile(p) for p in [
+BLACKLISTED = make_regex_set([
     '__va_list_tag$',
     'cairo_(?:rectangle_list|path)_destroy$',
     # ^ we don't need to call these functions at all.
     'cairo_(?:glyph|text_cluster)_(?:allocate|free)$',
     # ^ we will destroy them on behalf of the users.
+    'g_unicode_canonical_decomposition$',
+    # ^ these objects are deprecated.
+    'g_u(?:tf8|tf16|cs4)_',
+    'g_unichar_to_utf8$',
+    # ^ these objects are too C-centric. They are useless in the Oz world.
     'cairo_user_(?:scaled_font|font_face)',
     'cairo_surface_observer_add_',
     'cairo_(?:surface|device)_observer_print$',
@@ -23,82 +29,95 @@ BLACKLISTED = [re.compile(p) for p in [
     # ^ TODO: restore these functions (need bytestring support).
     'cairo_image_surface_create_(?:for_data|from_png_stream)$',
     # ^ TODO: needs to protect the data with this function!
-]]
+    'g_unicode_canonical_ordering$'
+])
 
 HEADER_WHITELIST = [
     '/usr/include/cairo/',
     '/usr/include/glib'
 ]
 
-SPECIAL_ARGUMENTS = [(re.compile(p), i) for p, i in {
+SPECIAL_ARGUMENTS = make_regex_map({
     'cairo_(?:font_face_|scaled_font_|device_|surface_|pattern_)?get_user_data$':
-        {'return': 'NodeOut'},
+        {'return': NodeOut},
     'cairo_(?:font_face_|scaled_font_|device_|surface_|pattern_)?set_user_data$':
-        {'user_data': 'NodeIn'},
+        {'user_data': NodeIn},
     'cairo_(?:user_to_device|device_to_user|matrix_transform_point)$':
-        {'x': 'InOut', 'y': 'InOut'},
+        {'x': InOut, 'y': InOut},
     'cairo_(?:user_to_device|device_to_user|matrix_transform)_distance$':
-        {'dx': 'InOut', 'dy': 'InOut'},
+        {'dx': InOut, 'dy': InOut},
     'cairo_(?:path|stroke|fill|clip)_extents$':
-        {'x1': 'Out', 'x2': 'Out', 'y1': 'Out', 'y2': 'Out'},
+        {'x1': Out, 'x2': Out, 'y1': Out, 'y2': Out},
     'cairo_(?:(?:get|pattern_get|get_font)_matrix|matrix_init(?:_identity|_translate|_scale|_rotate)?)$':
-        {'matrix': 'Out'},
+        {'matrix': Out},
     'cairo_matrix_(?:translate|scale|rotate|invert)$':
-        {'matrix': 'InOut'},
+        {'matrix': InOut},
     'cairo_matrix_multiply$':
-        {'result': 'Out'},
+        {'result': Out},
     'cairo_scaled_font_get_(?:ctm|(?:font|scale)_matrix)$':
-        {'ctm': 'Out', 'scale_matrix': 'Out', 'font_matrix': 'Out'},
+        {'ctm': Out, 'scale_matrix': Out, 'font_matrix': Out},
     'cairo_(?:get_current|mesh_pattern_get_control)_point$':
-        {'x': 'Out', 'y': 'Out'},
+        {'x': Out, 'y': Out},
     'cairo_(?:show_(?:text_)?glyphs|glyph_path)$':
-        {'utf8_len': ('Constant', '-1')},
+        {'utf8_len': (Constant, '-1')},
     'cairo_(?:(?:scaled_font_)?(?:text|glyph)|(?:scaled_)?font|re(?:gion|cording_surface)_get)_extents$':
-        {'extents': 'Out'},
+        {'extents': Out},
     'cairo_scaled_font_text_to_glyphs$':
-        {'cluster_flags': 'Out', 'utf8_len': ('Constant', '-1')},
+        {'cluster_flags': Out, 'utf8_len': (Constant, '-1')},
     'cairo_surface_get_device_offset$':
-        {'x_offset': 'Out', 'y_offset': 'Out'},
+        {'x_offset': Out, 'y_offset': Out},
     'cairo_surface_get_fallback_resolution$':
-        {'x_pixels_per_inch': 'Out', 'y_pixels_per_inch': 'Out'},
+        {'x_pixels_per_inch': Out, 'y_pixels_per_inch': Out},
     'cairo_(?:mesh_pattern_get_corner_color|pattern_get(?:_color_stop)?)_rgba$':
-        {'red': 'Out', 'green': 'Out', 'blue': 'Out', 'alpha': 'Out',
-         'offset': 'Out'},
+        {'red': Out, 'green': Out, 'blue': Out, 'alpha': Out, 'offset': Out},
     'cairo_pattern_get_surface$':
-        {'surface': 'Out'},
+        {'surface': Out},
     'cairo_(?:mesh_pattern_get_patch|pattern_get_color_stop)_count$':
-        {'count': 'Out'},
+        {'count': Out},
     'cairo_pattern_get_(?:linear_points|radial_circles)$':
-        {'x0': 'Out', 'y0': 'Out', 'x1': 'Out', 'y1': 'Out',
-         'r0': 'Out', 'r1': 'Out'},
+        {'x0': Out, 'y0': Out, 'x1': Out, 'y1': Out,
+         'r0': Out, 'r1': Out},
     'cairo_recording_surface_ink_extents$':
-        {'x0': 'Out', 'y0': 'Out', 'width': 'Out', 'height': 'Out'},
+        {'x0': Out, 'y0': Out, 'width': Out, 'height': Out},
     'cairo_region_get_rectangle$':
-        {'rectangle': 'Out'},
-}.items()]
+        {'rectangle': Out},
+    'g_unichar_get_mirror_char$':
+        {'mirrored_ch': Out},
+    'g_unichar_compose$':
+        {'ch': Out},
+    'g_unichar_decompose$':
+        {'a': Out, 'b': Out},
+    'g_cclosure_marshal_':
+        {'return_value': Out},
+})
 
-FUNCTION_PRE_SETUP = {}
+FUNCTION_PRE_SETUP = []
 
-FUNCTION_POST_SETUP = {}
+FUNCTION_POST_SETUP = []
 
-FUNCTION_PRE_TEARDOWN = {}
+FUNCTION_PRE_TEARDOWN = []
 
-FUNCTION_POST_TEARDOWN = {
-    'cairo_copy_clip_rectangle_list':
+FUNCTION_POST_TEARDOWN = make_regex_map({
+    'cairo_copy_clip_rectangle_list$':
         'cairo_rectangle_list_destroy(*' + CC_NAME_OF_RETURN + ');',
-    'cairo_copy_path':
+    'cairo_copy_path(?:_flat)?$':
         'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
-    'cairo_copy_path_flat':
-        'cairo_path_destroy(*' + CC_NAME_OF_RETURN + ');',
-    'cairo_scaled_font_text_to_glyphs': """
-        cairo_text_cluster_free(*%s);
-        cairo_glyph_free(*%s);
-    """ % (cc_name_of('clusters'), cc_name_of('glyphs')),
-}
+    'cairo_scaled_font_text_to_glyphs$': """
+        cairo_text_cluster_free(*{0});
+        cairo_glyph_free(*{1});
+    """.format(cc_name_of('clusters'), cc_name_of('glyphs')),
+    'g_unicode_canonical_decomposition$':
+        'g_free(*' + CC_NAME_OF_RETURN + ');',
+})
 
 SPECIAL_ARGUMENTS_FOR_TYPES = {
-    'cairo_destroy_func_t': ('NodeDeleter', 0),
-    'cairo_user_data_key_t const *': 'AddressIn',
+    'cairo_destroy_func_t': (NodeDeleter, 0),
+    'cairo_user_data_key_t const *': AddressIn,
+    'gboolean': BooleanIn,
+}
+
+SPECIAL_ARGUMENTS_FOR_RETURN_TYPES = {
+    'gboolean': BooleanOut,
 }
 
 SPECIAL_TYPES = {
@@ -175,7 +194,7 @@ SPECIAL_TYPES = {
         cc.num_data = data_list.size();
         cc.data = new (vm) cairo_path_data_t[cc.num_data];
         memcpy(cc.data, data_list.data(), sizeof(*cc.data) * cc.num_data);
-    """)
+    """),
 }
 
 SPECIAL_FUNCTIONS = {
@@ -200,6 +219,15 @@ SPECIAL_FUNCTIONS = {
             auto cc_data = cairo_image_surface_get_data(cc_surface);
             data = ByteString::build(vm, newLString(vm, cc_data, length));
         """),
+    'g_unichar_fully_decompose':
+        (', In ch, In compat, Out result', """
+            gunichar cc_ch;
+            unbuild(vm, ch, cc_ch);
+            gboolean cc_compat = BooleanValue(compat).boolValue(vm);
+            gunichar cc_result[G_UNICHAR_MAX_DECOMPOSITION_LENGTH];
+            gsize length = g_unichar_fully_decompose(cc_ch, cc_compat, cc_result, sizeof(cc_result)/sizeof(*cc_result));
+            result = buildDynamicList(vm, cc_result, cc_result + length);
+        """),
 }
 
 FLAGS = [re.compile(p) for p in [
@@ -211,7 +239,19 @@ FLAGS = [re.compile(p) for p in [
     'GSignalMatchType$',
 ]]
 
-OPAQUE_STRUCTS = {
-    '_GArray'
+CONCRETE_STRUCTS = {
+    '_cairo_user_data_key',
+    '_cairo_rectangle_int',
+    '_cairo_rectangle',
+    '_cairo_rectangle_list',
+    'cairo_glyph_t',
+    'cairo_text_cluster_t',
+    'cairo_text_extents_t',
+    'cairo_font_extents_t',
+    '_cairo_matrix',
+}
+
+CONCRETE_OPAQUE_STRUCTS = {
+    '_GValue': 'G_VALUE_INIT'
 }
 

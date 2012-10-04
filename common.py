@@ -127,8 +127,8 @@ def name_of(node):
     else:
         return ''
 
-def is_concrete(struct_decl, opaque_structs):
-    return struct_decl.is_definition() and name_of(struct_decl) not in opaque_structs
+def is_concrete(struct_decl, concrete_structs):
+    return struct_decl.is_definition() and name_of(struct_decl) in concrete_structs
 
 #-------------------------------------------------------------------------------
 
@@ -154,4 +154,18 @@ def group_by(iterable, keyfunc):
     for obj in iterable:
         res[keyfunc(obj)].append(obj)
     return res
+
+#-------------------------------------------------------------------------------
+
+def find_from_regex_map(lst, key, default=None):
+    for regex, value in lst:
+        if regex.match(key):
+            return value
+    return default
+
+def make_regex_map(dictionary):
+    return [(re.compile(key), value) for key, value in dictionary.items()]
+
+def make_regex_set(lst):
+    return list(map(re.compile, lst))
 

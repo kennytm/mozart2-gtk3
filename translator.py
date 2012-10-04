@@ -5,6 +5,7 @@ import sys
 from os import makedirs
 from os.path import join, basename, splitext
 from importlib import import_module
+from collections import OrderedDict
 from clang.cindex import Config, TranslationUnit, CursorKind
 from common import *
 from builders import BuildersWriter
@@ -20,9 +21,9 @@ Config.set_compatibility_check(False)
 #-------------------------------------------------------------------------------
 
 def collect_nodes(basename, constants):
-    types = []
-    functions = []
-    existing_names = set()
+    functions = {}
+    types = OrderedDict()
+    # order is important, otherwise the builders will refer to non-existing types.
 
     clang_args = [arg.encode('utf-8') for arg in constants.PKG_CONFIG_RES]
     include_paths = [arg[2:] for arg in constants.PKG_CONFIG_RES if arg[:2] == '-I']
@@ -33,9 +34,6 @@ def collect_nodes(basename, constants):
         name = name_of(node)
         if any(regex.match(name) for regex in constants.BLACKLISTED):
             continue
-        if name in existing_names:
-            continue
-        existing_names.add(name)
 
         source_file = node.location.file
         if source_file:
@@ -45,11 +43,11 @@ def collect_nodes(basename, constants):
 
         kind = node.kind
         if kind == CursorKind.FUNCTION_DECL:
-            functions.append(node)
+            functions[name] = node
         elif kind in {CursorKind.STRUCT_DECL, CursorKind.ENUM_DECL}:
-            types.append(node)
+            types[name] = node
 
-    return (types, functions)
+    return (types.values(), functions.values())
 
 
 def get_mod_name(cursor):
@@ -66,11 +64,12 @@ def translate(basename):
     makedirs(join(SRC, basename + OUT_EXT), exist_ok=True)
 
     with BuildersWriter(basename, constants) as bf, \
-            DataTypeDeclWriter(basename) as dtd, DataTypeWriter(basename) as dt:
+            DataTypeDeclWriter(basename, constants) as dtd, \
+            DataTypeWriter(basename, constants) as dt:
         for type_decl in types:
             bf.write_type(type_decl)
             if type_decl.kind == CursorKind.STRUCT_DECL:
-                if not is_concrete(type_decl, constants.OPAQUE_STRUCTS):
+                if not is_concrete(type_decl, constants.CONCRETE_STRUCTS):
                     struct_name = name_of(type_decl)
                     dtd.write_datatype(struct_name)
                     dt.write_datatype(struct_name)

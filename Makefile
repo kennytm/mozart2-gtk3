@@ -17,7 +17,7 @@ Generator = $(MOZART_DIR)/generator/main/generator
 
 CXX = g++
 CXXFLAGS = -std=c++11 -I$(MOZART_DIR)/vm/main -I$(MOZART_DIR)/boostenv/main -g \
-           -I$(OUT_DIR) -Isrc $(EXTRA_CFLAGS)
+           -I$(OUT_DIR) -Isrc $(EXTRA_CFLAGS) -fmax-errors=10
 OZBC = java -jar $(BOOTCOMPILER_DIR)/target/scala-2.9.1/bootcompiler_2.9.1-2.0-SNAPSHOT-one-jar.jar
 OZBCFLAGS = -h boostenv.hh -h $(MODULE).hh -b $(BASE_ENV_TXT) \
             -m $(MOZART_DIR)/vm/main -m $(MOZART_DIR)/boostenv/main -m $(OUT_DIR)
