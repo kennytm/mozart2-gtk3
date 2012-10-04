@@ -1,7 +1,7 @@
 # Convert a clang Type to a C++ declaration.
 
 from collections import Callable
-from clang.cindex import TypeKind, CursorKind
+from clang.cindex import TypeKind, CursorKind, Cursor
 
 # A convertor should perform have the signature:
 #
@@ -42,6 +42,11 @@ RECORD_KEYWORD = {
 def convert_canonical(typ):
     decl = typ.get_declaration()
     struct_name = decl.displayname.decode('utf-8')
+    if not struct_name:
+        typedef_node = Cursor.from_location(decl.translation_unit, decl.extent.end)
+        if typedef_node.kind == CursorKind.TYPEDEF_DECL:
+            struct_name = typedef_node.displayname.decode('utf-8')
+
     if struct_name:
         sb = [struct_name]
     else:
