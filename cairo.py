@@ -29,7 +29,8 @@ BLACKLISTED = make_regex_set([
     # ^ TODO: restore these functions (need bytestring support).
     'cairo_image_surface_create_(?:for_data|from_png_stream)$',
     # ^ TODO: needs to protect the data with this function!
-    'g_unicode_canonical_ordering$'
+    'g_unicode_canonical_ordering$',
+    'cairo_append_path$'
 ])
 
 HEADER_WHITELIST = [

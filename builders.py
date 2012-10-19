@@ -322,7 +322,7 @@ class BuildersWriter(Writer):
         self.write("""
             static UnstableNode build(VM vm, {0} cc) {{
                 OzListBuilder builder (vm);
-                auto flags = static_cast<std::underlying_type<{0}>::type>(cc);
+                auto flags = static_cast<size_t>(cc);
         """.format(enum_name))
 
         for cc_enum_name, atom_name in zip(cc_enum_names, atom_names):
